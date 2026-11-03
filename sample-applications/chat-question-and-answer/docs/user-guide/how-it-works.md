@@ -87,6 +87,17 @@ The application flow is illustrated in the flow diagram below. The diagram shows
    - **How it’s used**: The UI microservice runs on the deployed HW on a certain configured port. Accessing the specific URL allows users to use the UI.
    - **Benefits**: This microservice should be treated as a sample reference implementation.
 
+5. **pgvector database**
+   - **what it is**:
+   - **How it's used**:
+   - **Benefits**:
+
+6. **Metrics Manager microservice**
+   - **What it is**:
+   - **How it's used**:
+   - **Benefits**:
+
+
 ## Extensibility
 
 The Chat Q&A sample application is designed with modularity in mind, allowing developers to:

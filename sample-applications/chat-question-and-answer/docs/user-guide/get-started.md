@@ -19,10 +19,9 @@ By following this guide, you will learn how to:
 ## Prerequisites
 
 - Verify that your system meets the [minimum requirements](./get-started/system-requirements.md).
-- Install Docker: [Installation Guide](https://docs.docker.com/get-docker/).
-- Install Docker Compose : `Required v2.33.1` [Installation Guide](https://docs.docker.com/compose/install/).
-- Install `Python 3.11`.
-- Model download microservice is up and running. [Get Started Guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/model-download/get-started.html).
+- Install Docker or equivalent (f.ex. podman)
+- Install Docker Compose or equivalent (f.ex podman compose)
+- Install `Python 3.12`.
 - `jq` command-line JSON processor: [Installation Guide](https://jqlang.org/download/).
 
 <!--
@@ -44,14 +43,11 @@ The sample application has been validated with a few models just to validate the
 ### LLM Models validated for each model server
 | Model Server | Models Validated |
    |--------------|-------------------|
-   | `vLLM` (deprecated) | `Intel/neural-chat-7b-v3-3`, `Qwen/Qwen2.5-7B-Instruct`, `microsoft/Phi-3.5-mini-instruct`, `meta-llama/Llama-3.1-8B-instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` |
-   | `OVMS` | `Intel/neural-chat-7b-v3-3`, `Qwen/Qwen2.5-7B-Instruct`, `microsoft/Phi-3.5-mini-instruct`, `meta-llama/Llama-3.1-8B-instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` |
-   | `TGI` (deprecated) | `Intel/neural-chat-7b-v3-3`, `Qwen/Qwen2.5-7B-Instruct`, `microsoft/Phi-3.5-mini-instruct`, `meta-llama/Llama-3.1-8B-instruct`, `deepseek-ai/DeepSeek-R1-Distill-Qwen-7B` |
+   | `OVMS` | `Intel/neural-chat-7b-v3-3`, `Qwen/Qwen2.5-7B-Instruct`, `OpenAI/gpt-oss-20b` |
 
 **Note:**
 
-1. Limited validation was done on DeepSeek model.
-2. Effective 2025.2.0 release, support for vLLM and TGI is deprecated. The functionality is not guaranteed to work and the user is advised not to use them. Should there be a strong requirement for the same, please raise an issue in github.
+1. Limited validation was done on gpt-oss model.
 
 ### Reranker Models validated
 
@@ -82,54 +78,26 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
 
    ```bash
    # Clone the latest on mainline
-   git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries
-   # Alternatively, Clone a specific release branch
-   git clone https://github.com/open-edge-platform/edge-ai-libraries.git edge-ai-libraries -b <release-tag>
-   ```
+   git clone https://github.com/darekuklinski/edge-ai-libraries.git edge-ai-libraries
 
    Note: Adjust the repo link appropriately in case of forked repo.
 
-2. **Bring Up the Model Download Microservice**:
-  Before proceeding, you must bring up the model-download microservice with `plugin=openvino`. This service is required for downloading and converting models. For instructions on how to deploy and configure the model-download microservice, refer to its [Get Started guide](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/model-download/get-started.html).
 
-3. **Navigate to the Directory**:
+2. **Navigate to the Directory**:
    Go to the directory where the Docker Compose file is located:
 
    ```bash
    cd edge-ai-libraries/sample-applications/chat-question-and-answer
    ```
 
-4. **Set Up Environment Variables**:
+3. **Set Up Environment Variables**:
     Set up the environment variables based on the inference method you plan to use:
 
-    _Common configuration_
-
     ```bash
-    export HUGGINGFACEHUB_API_TOKEN=<your-huggingface-token>
-    export LLM_MODEL=Qwen/Qwen2.5-7B-Instruct
-    export EMBEDDING_MODEL_NAME=Alibaba-NLP/gte-large-en-v1.5
-    export RERANKER_MODEL=BAAI/bge-reranker-base
-    export DEVICE="CPU" # Options: CPU for VLLM and TGI. GPU is only enabled for openvino model server(OVMS) .
-
-    # Model-Download microservice configuration
-    export MODEL_DOWNLOAD_HOST=<your-model-download-host>
-    export MODEL_DOWNLOAD_PORT=<your-model-download-port>
+    cp .env.example .env
     ```
 
-    _Optional OTLP configuration_
-
-    ```bash
-    # Set only if there is an OTLP endpoint available
-    export OTLP_ENDPOINT_TRACE=<otlp-endpoint-trace>
-    export OTLP_ENDPOINT=<otlp-endpoint>
-    ```
-
-   _Document Ingestion Microservice configuration_
-
-    ```bash
-   # Mandatory for safe URL ingestion by Document Ingestion Microservice to mitigate SSRF attacks
-    export ALLOWED_HOSTS=<comma_separated_list_of_trusted_domains> # Ex: example.com,subdomain.example.com
-    ```
+   > Adjust section in .env with required fields like hf_token, and if needed adjust device, if Your system does not have GPU
 
     For detailed guidance on configuring __ALLOWED_HOSTS__ for different deployment scenarios, refer to [ALLOWED_HOSTS Configuration](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/pgvector/get-started.html#allowed-hosts-configuration)
 
@@ -137,17 +105,10 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
 
     Refer to the supported model list in the [Get Started](./get-started.md) document.
 
-    _Run the below script to set up the rest of the environment depending on the model server and embedding._
+   Usage of scripts/run_chatQnA.sh is strongly recommended for users using other distro than fedora.
+   Setup script is interactive, so it will perform full setup. No need of applying .env changes manually
 
-    ```bash
-    export REGISTRY="intel/"
-    export TAG=latest
-    source setup.sh llm=<model-server> embed=<embedding>
-    # Below are the options
-    # model-server: VLLM(deprecated) , OVMS, TGI(deprecated)
-    # embedding: OVMS
-    ```
-
+   Power users can launch compose directly as well.
    When launching Compose directly instead of using `setup.sh`, keep `DEVICE`, `COMPOSE_PROFILES`, and `STARTUP_MODELS_CONFIG_HOST_PATH` aligned in `.env`:
 
    | Device | `COMPOSE_PROFILES` | `STARTUP_MODELS_CONFIG_HOST_PATH` |
@@ -157,18 +118,18 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
 
    The GPU OVMS profile exposes `/dev/dri`. Selecting the CPU OVMS profile with GPU-configured models leaves OVMS without a GPU device and can make it terminate during model initialization.
 
-5. **Start the Application**:
-   Start the application using Docker Compose:
+4. **Start the Application**:
+   Start the application using Podman Compose:
 
    ```bash
-   docker compose up
+   podman compose up # Replace with other solution in case of using Debina-based linux
    ```
 
    If you changed the `metrics-manager` Dockerfile, rebuild that service first; plain `docker compose up` may reuse an older image:
 
    ```bash
-   docker compose build metrics-manager
-   docker compose up
+   podman compose build metrics-manager
+   podman compose up
    ```
 
    - Refer to [the application architecture diagram](./how-it-works.md#technical-architecture-diagram) .
@@ -177,11 +138,11 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
    Check that the application is running:
 
    ```bash
-   docker ps
+   podman ps
    ```
 
 7. **Access the Application**:
-   Open a browser and go to `http://<host-ip>:8101` to access the application dashboard. The application dashboard allows the user to,
+   Open a browser and go to `http://localhost:8101` to access the application dashboard. The application dashboard allows the user to,
     - Create and manage context by adding documents (pdf, docx, etc.) and web links (only https).
     > **Note**:
     > - There are restrictions on the max size of the document allowed.
@@ -191,6 +152,7 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
 ## Running in Kubernetes
 
 Refer to [Deploy with Helm](./get-started/deploy-with-helm.md) for the details. Ensure the prerequisites mentioned on this page are addressed before proceeding to deploy with Helm.
+> This section requires validation. No warranty on kubernetes with this fork
 
 ## Running Tests
 
