@@ -1,0 +1,19 @@
+download_path: .
+parallel_downloads: true
+models:
+  - name: OpenVINO/gpt-oss-20b-int4-ov
+    hub: huggingface
+    type: llm
+    is_ovms: false
+    config:
+      precision: int8
+      device: CPU
+      cache_size: 10
+  - name: nomic-ai/nomic-embed-text-v1.5
+    hub: huggingface
+    type: embeddings
+    is_ovms: false
+    config:
+      precision: int8
+      device: CPU
+      extra_quantization_params: --library sentence_transformers

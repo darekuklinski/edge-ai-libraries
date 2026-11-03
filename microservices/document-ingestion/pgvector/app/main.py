@@ -113,8 +113,9 @@ async def ingest_document(
         files (list[UploadFile]): A file or multiple files to be ingested.
 
     Returns:
-        dict: A status message indicating the result of the ingestion.
+        dict: Ingestion status and the stored file names and bucket names.
     """
+    uploaded_files = []
     try:
         if files:
             if not isinstance(files, list):
@@ -166,7 +167,15 @@ async def ingest_document(
                         Path(temp_path).unlink()
                         logger.info("Temporary file cleaned up!")
 
-        result = {"status": 200, "message": "Data preparation succeeded"}
+                uploaded_files.append(
+                    {"file_name": uploaded_filename, "bucket_name": bucket_name}
+                )
+
+        result = {
+            "status": 200,
+            "message": "Data preparation succeeded",
+            "files": uploaded_files,
+        }
 
         return result
 

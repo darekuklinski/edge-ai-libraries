@@ -16,6 +16,9 @@ ARG GID=101
 RUN groupadd -g ${GID} user && \
     useradd -m -s /bin/bash -u ${UID} -g ${GID} user
 
+# WORKDIR is created by the builder as root unless ownership is fixed explicitly.
+RUN mkdir -p /user/app && chown -R ${UID}:${GID} /user/app
+
 # Switch to the non-root user
 USER user
 WORKDIR /user/app/
@@ -48,6 +51,7 @@ COPY ./nginx.conf /etc/nginx/nginx.conf
 
 # Ensure the entrypoint script is executable
 USER root
+RUN chown -R nginx:nginx /opt/share/nginx/html
 RUN apt-get update && \
     apt-get upgrade -y && \
     rm -rf /var/lib/apt/lists/*

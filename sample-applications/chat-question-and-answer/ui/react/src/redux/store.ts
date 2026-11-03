@@ -19,7 +19,17 @@ export const store = configureStore({
 
 function saveToLocalStorage(state: ReturnType<typeof store.getState>) {
   try {
-    const serialState = JSON.stringify(state);
+    const serialState = JSON.stringify({
+      ...state,
+      conversationReducer: {
+        ...state.conversationReducer,
+        conversations: [],
+        selectedConversationId: "",
+        onGoingResults: {},
+        isGenerating: {},
+        isWaitingForFirstToken: {},
+      },
+    });
     localStorage.setItem("reduxStore", serialState);
   } catch (e) {
     console.warn(e);
@@ -30,7 +40,16 @@ function loadFromLocalStorage() {
   try {
     const serialisedState = localStorage.getItem("reduxStore");
     if (serialisedState === null) return undefined;
-    return JSON.parse(serialisedState);
+    const state = JSON.parse(serialisedState);
+    if (state?.conversationReducer) {
+      state.conversationReducer.conversations = [];
+      state.conversationReducer.selectedConversationId = "";
+      state.conversationReducer.onGoingResults = {};
+      state.conversationReducer.isGenerating = {};
+      state.conversationReducer.isWaitingForFirstToken = {};
+      localStorage.setItem("reduxStore", JSON.stringify(state));
+    }
+    return state;
   } catch (e) {
     console.warn(e);
     return undefined;

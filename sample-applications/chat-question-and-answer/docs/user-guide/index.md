@@ -68,8 +68,8 @@ microservice allows ingestion of common document formats like PDF and DOC, and c
 web links. It supports a REST endpoint to ingest the documents. The ingestion process creates
 embeddings of the documents and stores them in the preferred vector database. The modular
 architecture allows users to customize the vector database. The sample application uses the
-[PGvector](https://github.com/pgvector/pgvector) database. The raw documents are stored in the
-[MinIO](https://github.com/minio/minio) datastore, which is also customizable.
+[PGvector](https://github.com/pgvector/pgvector) database. The raw documents are stored in an
+S3-compatible object store (RustFS in the Docker Compose deployment and MinIO in the Helm deployment).
 - **Chat Q&A backend microservice**: The Chat Q&A backend microservice is responsible for
 responding to the user queries. LangChain framework is used to create the RAG chain and provide
 the necessary integrations with VectorDB. The backend microservice provides a REST API to

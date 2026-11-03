@@ -146,6 +146,37 @@ class TestFetchMetrics:
         assert "cpu_usage_user" in names
         assert "gpu_engine_usage_usage" in names
 
+    @pytest.mark.asyncio
+    async def test_fetch_includes_intel_gpu_engine_busy_metrics(self):
+        prometheus_text = (
+            'intel_gpu_engine_busy_percent{engine="Render/3D",gpu_id="1",'
+            'host="edge-host"} 12.5 1777463430000\n'
+        )
+        mock_resp = MagicMock()
+        mock_resp.text = prometheus_text
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client.get = AsyncMock(return_value=mock_resp)
+
+        with patch("app.sse.httpx.AsyncClient", return_value=mock_client):
+            result = json.loads(await fetch_metrics())
+
+        assert result["metrics"] == [
+            {
+                "name": "intel_gpu_engine_busy_percent",
+                "labels": {
+                    "engine": "Render/3D",
+                    "gpu_id": "1",
+                    "host": "edge-host",
+                },
+                "value": pytest.approx(12.5),
+                "timestamp": 1777463430000,
+            }
+        ]
+
 
 class TestEventStream:
     @pytest.mark.asyncio

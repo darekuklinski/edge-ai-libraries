@@ -242,18 +242,18 @@ case "$ACTION" in
 
         # Run the Docker container
         log_info "Starting model download service..."
-        if docker compose ps | grep -q "model_download"; then
+        if podman compose ps | grep -q "model_download"; then
             log_warning "Service is already running. Stopping first..."
-            docker compose -f docker/compose.yaml down
+            podman compose -f docker/compose.yaml down
         fi
 
-        docker compose -f docker/compose.yaml up
+        podman compose -f docker/compose.yaml up
 
         ;;
     down)
         # For down action, we only need to stop the services
         log_info "Stopping model download service..."
-        docker compose -f docker/compose.yaml down
+        podman compose -f docker/compose.yaml down
         log_success "Model download service stopped."
         ;;
     *)

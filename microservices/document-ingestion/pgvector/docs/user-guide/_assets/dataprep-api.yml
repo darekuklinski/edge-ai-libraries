@@ -41,7 +41,7 @@ paths:
             files (list[UploadFile]): A file or multiple files to be ingested.
 
         Returns:
-            dict: A status message indicating the result of the ingestion.
+            dict: Ingestion status and the stored file names and bucket names.
       operationId: ingest_document_documents_post
       requestBody:
         required: true
@@ -57,6 +57,22 @@ paths:
               schema:
                 type: object
                 title: Response Ingest Document Documents Post
+                properties:
+                  status:
+                    type: integer
+                    example: 200
+                  message:
+                    type: string
+                    example: Data preparation succeeded
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        file_name:
+                          type: string
+                        bucket_name:
+                          type: string
         '422':
           description: Validation Error
           content:

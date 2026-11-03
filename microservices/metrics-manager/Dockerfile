@@ -52,8 +52,8 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
-RUN cargo install --locked qmassa@1.3.1
-RUN cargo install --locked qmmd@0.1.1
+RUN cargo install --locked --git https://github.com/ulissesf/qmassa --tag qmmd-v0.2.0 qmmd
+RUN cargo install --locked --git https://github.com/ulissesf/qmassa --tag qmassa-v2.1.0 qmassa
 
 # -----------------------------------------------------------------------------
 # Stage 2: Build Python dependencies
@@ -80,9 +80,8 @@ RUN pip install --no-cache-dir uv==0.7.12
 
 WORKDIR /app
 
-# Copy dependency files (uv.lock is optional - will be generated if missing)
+# Copy dependency metadata; uv resolves from pyproject.toml when no lockfile exists.
 COPY pyproject.toml ./
-COPY uv.lock* ./
 
 # Install dependencies to a virtual environment
 # Note: Not using --frozen so uv can resolve dependencies if lock is missing/stale
@@ -151,7 +150,10 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install --yes --no-install-recommends \
         supervisor \
-        curl && \
+        curl \
+        perl \
+        debconf \
+        intel-gpu-tools && \
     # Download and install Telegraf .deb directly (pinned version, no GPG issues)
     curl -fsSL "https://dl.influxdata.com/telegraf/releases/telegraf_${TELEGRAF_VERSION}-1_amd64.deb" -o /tmp/telegraf.deb && \
     dpkg -i /tmp/telegraf.deb && \
@@ -180,11 +182,15 @@ RUN mkdir -p /app/custom-metrics /app/config
 
 # Copy application files
 COPY app ./app
-COPY scripts ./scripts
+
 COPY VERSION ./
 COPY telegraf.conf /etc/telegraf/telegraf.conf
 COPY supervisord.conf /etc/supervisor/supervisord.conf
 COPY entrypoint.sh /entrypoint.sh
+
+WORKDIR /app/scripts
+COPY scripts .
+RUN ls -la /app/scripts/
 
 # Strip CRLF (handles files copied from Windows working directories)
 RUN sed -i 's/\r$//' /entrypoint.sh /etc/telegraf/telegraf.conf /etc/supervisor/supervisord.conf && \

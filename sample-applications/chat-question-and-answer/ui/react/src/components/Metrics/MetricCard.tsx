@@ -71,14 +71,21 @@ export function MetricCard({ label, value, color, data }: MetricCardProps) {
     return (
         <div className={classes.chartCard}>
             <div className={classes.chartCardHead}>
-                <span className={classes.chartCardLabel}>{label}</span>
+                <span className={classes.chartCardLabel} title={label}>{label}</span>
                 <span className={classes.chartCardValue} style={{ color }}>
                     {value}
                 </span>
             </div>
 
-            <div className={classes.chartWrap}>
-                <Line data={chartData} options={options} />
+            <div className={classes.metricChartBody}>
+                <div className={classes.chartWrap}>
+                    <Line data={chartData} options={options} />
+                </div>
+                <div className={classes.metricScale} aria-label="Percentage scale">
+                    {[100, 75, 50, 25, 0].map((tick) => (
+                        <span key={tick}>{tick}%</span>
+                    ))}
+                </div>
             </div>
         </div>
     )

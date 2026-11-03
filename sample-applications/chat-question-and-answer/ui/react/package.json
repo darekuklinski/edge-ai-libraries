@@ -19,13 +19,17 @@
     "@reduxjs/toolkit": "^2.12.0",
     "@tabler/icons-react": "3.44.0",
     "axios": "^1.16.1",
+    "chart.js": "^4.1.1",
     "i18next": "^26.2.0",
     "luxon": "^3.7.2",
     "npm-check-updates": "^22.2.0",
     "react": "^19.2.6",
+    "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.2.6",
     "react-i18next": "^17.0.8",
-    "react-redux": "^9.3.0"
+    "react-markdown": "^10.1.0",
+    "react-redux": "^9.3.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

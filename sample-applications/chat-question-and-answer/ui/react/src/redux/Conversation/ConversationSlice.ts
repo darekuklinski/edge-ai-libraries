@@ -4,12 +4,52 @@
 import { PayloadAction, createSlice, createAsyncThunk } from "@reduxjs/toolkit";
 import { RootState } from "../store";
 import { fetchEventSource } from "@microsoft/fetch-event-source";
-import { Message, MessageRole, ConversationReducer, ConversationRequest, File } from "./Conversation";
+import {
+  Message,
+  MessageRole,
+  ConversationReducer,
+  ConversationRequest,
+  Conversation,
+  File,
+  FileUploadResponse,
+} from "./Conversation";
 import { getCurrentTimeStamp, uuidv4, checkHealth } from "../../utils/util";
 import { createAsyncThunkWrapper } from "../thunkUtil";
 import client from "../../utils/client";
 import { notifications } from "@mantine/notifications";
-import { CHAT_QNA_URL, DATA_PREP_URL, LINK_PREP_URL, MAX_TOKENS, MODEL_URL } from "../../config";
+import {
+  CHAT_QNA_URL,
+  CONVERSATION_HISTORY_URL,
+  DATA_PREP_URL,
+  LINK_PREP_URL,
+  MAX_TOKENS,
+  MODEL_URL,
+} from "../../config";
+
+type ConversationHistoryResponse = {
+  conversations: Conversation[];
+};
+
+export const persistConversationHistory = (conversations: Conversation[]) =>
+  client.put(
+    CONVERSATION_HISTORY_URL,
+    { conversations },
+    { timeout: 15000 },
+  );
+
+export const restoreConversationHistory = createAsyncThunk(
+  "conversation/restoreHistory",
+  async (_, { dispatch }) => {
+  const response = await client.get<ConversationHistoryResponse>(
+    CONVERSATION_HISTORY_URL,
+    { timeout: 15000 },
+  );
+
+  const conversations = response.data.conversations;
+  dispatch(replaceConversations(conversations));
+  return conversations;
+  },
+);
 
 
 const initialState: ConversationReducer = {
@@ -50,6 +90,25 @@ export const ConversationSlice = createSlice({
         conversationId: action.payload.id,
         Messages: [action.payload.message],
       });
+    },
+    replaceConversations: (state, action: PayloadAction<Conversation[]>) => {
+      state.conversations = action.payload;
+      if (
+        !action.payload.some(
+          (conversation) =>
+            conversation.conversationId === state.selectedConversationId,
+        )
+      ) {
+        state.selectedConversationId =
+          action.payload.at(-1)?.conversationId ?? "";
+      }
+    },
+    clearConversations: (state) => {
+      state.conversations = [];
+      state.selectedConversationId = "";
+      state.onGoingResults = {};
+      state.isGenerating = {};
+      state.isWaitingForFirstToken = {};
     },
     setSelectedConversationId: (state, action: PayloadAction<string>) => {
       state.selectedConversationId = action.payload;
@@ -255,9 +314,12 @@ export const fetchInitialFiles = createAsyncThunk(
         });
       }
     } catch (error: any) {
+      if (error.response?.status === 404) {
+        return { data: [] as File[], status: 404 };
+      }
       return rejectWithValue({
         message: error.message || 'An unknown error occurred',
-        status: 500,
+        status: error.response?.status || 500,
       });
     }
   },
@@ -425,18 +487,21 @@ export const submitDataSourceURL = createAsyncThunkWrapper(
   },
 );
 
-export const uploadFile = createAsyncThunkWrapper("conversation/uploadFile", async ({ file }: { file: globalThis.File }, { }) => {
-  const body = new FormData();
-  body.append("files", file);
+export const uploadFile = createAsyncThunkWrapper<FileUploadResponse, { file: globalThis.File }>(
+  "conversation/uploadFile",
+  async ({ file }) => {
+    const body = new FormData();
+    body.append("files", file);
 
-  notifications.show({
-    id: "upload-file",
-    message: "Uploading File...",
-    loading: true,
-  });
-  const response = await client.post(DATA_PREP_URL, body);
-  return response.data;
-});
+    notifications.show({
+      id: "upload-file",
+      message: "Uploading File...",
+      loading: true,
+    });
+    const response = await client.post(DATA_PREP_URL, body);
+    return response.data;
+  },
+);
 export const {
   setOnGoingResultForConversation,
   clearOnGoingResultForConversation,
@@ -444,6 +509,8 @@ export const {
   addMessageToConversation,
   setSelectedConversationId,
   createNewConversation,
+  replaceConversations,
+  clearConversations,
   deleteConversation,
   updateConversationTitle,
   setIsGenerating,
@@ -512,6 +579,7 @@ export const doConversation = createAsyncThunk(
     const body = {
       conversation_messages,
       max_tokens: MAX_TOKENS ?? 512,
+      attachments: conversationRequest.attachments ?? [],
     };
 
     // Set generating state - user has submitted, waiting for AI to start responding

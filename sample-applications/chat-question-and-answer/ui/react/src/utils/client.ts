@@ -5,4 +5,6 @@ import axios from "axios";
 
 //add iterceptors to add any request headers
 
+axios.defaults.withCredentials = true;
+
 export default axios;

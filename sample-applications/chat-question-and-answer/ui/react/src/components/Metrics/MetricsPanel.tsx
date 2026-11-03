@@ -2,10 +2,11 @@ import { GpuMetricCard } from "./GpuMetricCard"
 import { MetricCard } from "./MetricCard"
 import classes from "./MetricsPanel.module.scss"
 import { GPU_ENGINES, GpuEngine, MetricsPoint, useMetricsStream } from "./UseMetricsStream"
+import { SYSTEM_INFO } from "../../config"
 
 const getNumericData = (
   points: MetricsPoint[],
-  key: "cpu" | "npu" | "ram"
+  key: "cpu" | "ram"
 ) => points.map((p) => p[key]).filter((v): v is number => typeof v === "number")
 
 const getGpuEngineData = (points: MetricsPoint[], engine: GpuEngine) =>
@@ -13,7 +14,7 @@ const getGpuEngineData = (points: MetricsPoint[], engine: GpuEngine) =>
 
 const latestValue = (
   points: MetricsPoint[],
-  key: "cpu" | "npu" | "ram"
+  key: "cpu" | "ram"
 ) => {
   const value = points.at(-1)?.[key]
   return typeof value === "number" ? `${value.toFixed(1)}%` : "N/A"
@@ -22,26 +23,18 @@ const latestValue = (
 export function MetricsPanel() {
   const { points, isConnected } = useMetricsStream("percent")
 
-  const metrics = [
-    {
-      label: "CPU",
-      color: "#00A3F6",
-      data: getNumericData(points, "cpu"),
-      value: latestValue(points, "cpu"),
-    },
-    {
-      label: "NPU",
-      color: "#62CE58",
-      data: getNumericData(points, "npu"),
-      value: latestValue(points, "npu"),
-    },
-    {
-      label: "RAM",
-      color: "#F3AD26",
-      data: getNumericData(points, "ram"),
-      value: latestValue(points, "ram"),
-    },
-  ]
+  const cpuMetric = {
+    label: SYSTEM_INFO.cpu ? `CPU (${SYSTEM_INFO.cpu})` : "CPU",
+    color: "#00A3F6",
+    data: getNumericData(points, "cpu"),
+    value: latestValue(points, "cpu"),
+  }
+  const ramMetric = {
+    label: SYSTEM_INFO.ram ? `RAM (${SYSTEM_INFO.ram})` : "RAM",
+    color: "#F3AD26",
+    data: getNumericData(points, "ram"),
+    value: latestValue(points, "ram"),
+  }
 
   const gpuColors: Record<GpuEngine, string> = {
     bcs: "#C442CF",
@@ -65,17 +58,22 @@ export function MetricsPanel() {
       </div>
 
       <div className={classes.chartsGrid}>
-        {metrics.map((metric) => (
-          <MetricCard
-            key={metric.label}
-            label={metric.label}
-            value={metric.value}
-            color={metric.color}
-            data={metric.data}
-          />
-        ))}
-
-        <GpuMetricCard series={gpuEngineSeries} />
+        <MetricCard
+          label={cpuMetric.label}
+          value={cpuMetric.value}
+          color={cpuMetric.color}
+          data={cpuMetric.data}
+        />
+        <GpuMetricCard
+          title={SYSTEM_INFO.gpu ? `GPU (${SYSTEM_INFO.gpu})` : "GPU engines"}
+          series={gpuEngineSeries}
+        />
+        <MetricCard
+          label={ramMetric.label}
+          value={ramMetric.value}
+          color={ramMetric.color}
+          data={ramMetric.data}
+        />
       </div>
     </section>
   )

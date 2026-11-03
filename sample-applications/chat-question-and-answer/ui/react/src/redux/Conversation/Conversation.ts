@@ -4,6 +4,7 @@
 export type ConversationRequest = {
   conversationId: string;
   userPrompt: Message;
+  attachments?: File[];
 };
 export enum MessageRole {
   Assistant = "assistant",
@@ -17,11 +18,18 @@ export interface Message {
   time: number;
   conversationId?: string;
   responseTimeMs?: number;
+  attachments?: File[];
 }
 
 export interface File {
   file_name: string;
   bucket_name: string;
+}
+
+export interface FileUploadResponse {
+  status: number;
+  message: string;
+  files: File[];
 }
 
 export interface Conversation {

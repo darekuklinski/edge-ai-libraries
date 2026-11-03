@@ -16,6 +16,7 @@ from langchain_core.vectorstores import VectorStoreRetriever as EGAIVectorStoreR
 from langchain_openai import ChatOpenAI as EGAIModelServing
 from langchain_openai import OpenAIEmbeddings as EGAIEmbeddings
 from .custom_reranker import CustomReranker
+from .retrieval import retrieve_context
 import logging
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -90,12 +91,11 @@ retriever = EGAIVectorStoreRetriever(
 template = """
 <|start|>system<|message|>
 Reasoning: none
-Do not output your reasoning process, only the final output.
 SYSTEM CONSTRAINT: 
 You have no access to the internet.
 Don't hesitate to ask questions when in doubt, especially when question is unclear.
 If You don't know the answer just say it.
-IMPORTANT: Format all responses using Markdown for clear, readable communication:
+IMPORTANT: For longer answers use markdown as below. If answear is short, you can use regular text.:
 
 **Example:**
 ## Topic Title 
@@ -105,9 +105,23 @@ Here's regular text with
 - **Benefit 1:** Clear description
 - **Benefit 2:** Another point
 > 💡 **Pro Tip:** This makes information stand out!
+### Sample Table:
+| Syntax      | Description | Notes |
+| :---------- | :---------: | ----: |
+| Header      | Title       | Note1 |
+| Paragraph   | Text        | Note2 |
+### Sample Code:
+```python
+def example_function():
+    print("This is a code block")
+```
 Always prioritize clarity and scannability in your responses.
 <|end|><|start|>user<|message|>
 Conversation history: {history}
+Retrieved context:
+{context}
+
+Use retrieved context when relevant and combine it with your general knowledge. If the context does not contain the answer, be clear about that and answer from your general knowledge when possible. Do not invent facts or claim that unsupported statements came from the context.
 prompt: {question}
 <|end|><|start|>assistant
 """
@@ -154,8 +168,15 @@ async def context_retriever_fn(chain_inputs: dict):
     if not question:
         return {}  # to keep shape consistent
 
-    retrieved_docs = await retriever.ainvoke(question)
-    return retrieved_docs     # context: list[Document]
+    attachments = chain_inputs.get("attachments", [])
+    return await retrieve_context(
+        question,
+        attachments,
+        knowledge_base,
+        retriever,
+        FETCH_K,
+        FETCH_K * 3,
+    )
 
 # Format the context in a readable way
 def format_docs(docs):
@@ -181,7 +202,7 @@ def format_docs(docs):
     
     return "\n\n".join(formatted_docs)
 
-async def process_chunks(conversation_messages, max_tokens):
+async def process_chunks(conversation_messages, max_tokens, attachments=None):
     """
     Process a list of conversation messages and stream the LLM-generated answer.
 
@@ -267,7 +288,8 @@ async def process_chunks(conversation_messages, max_tokens):
     # Run the chain with all inputs
     chain_input = {
         "history": history, # chain will call context_retriever internally, no need to add it.
-        "question": question_text
+        "question": question_text,
+        "attachments": attachments or [],
     }
 
     async for log in chain.astream(chain_input):

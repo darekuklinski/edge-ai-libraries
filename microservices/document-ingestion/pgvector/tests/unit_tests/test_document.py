@@ -78,7 +78,13 @@ def test_ingest_documents(test_client, test_file):
                 files={"files": ("sample-file.txt", open(test_file["file_path"], "rb"), "text/plain")}
             )
             assert response.status_code == HTTPStatus.OK
-            assert response.json() == {"status": HTTPStatus.OK, "message": "Data preparation succeeded"}
+            assert response.json() == {
+                "status": HTTPStatus.OK,
+                "message": "Data preparation succeeded",
+                "files": [
+                    {"file_name": "sample-file.txt", "bucket_name": "test_bucket"}
+                ],
+            }
 
 
 def test_ingest_unsupported_document(test_client, test_file):

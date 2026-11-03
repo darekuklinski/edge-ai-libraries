@@ -18,14 +18,14 @@ RED='\033[0;31m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
 
-# Execution mode: "host" (docker run) or "internal" (inside container)
+# Execution mode: "host" (podman run) or "internal" (inside container)
 EXEC_MODE="host"
 
 # Service configuration
 SERVICE_PORT=8000
-HEALTH_TIMEOUT=180
+HEALTH_TIMEOUT=108000
 POLL_INTERVAL=5
-CONTAINER_NAME="model-download-ephemeral"
+CONTAINER_NAME="model-download-ephemeral-keep-id"
 
 # Default values
 MODEL_NAME=""
@@ -39,20 +39,25 @@ DEVICE="CPU"
 CACHE_SIZE=""
 CONFIG_JSON=""
 
-# Docker defaults (host mode only)
+# podman defaults (host mode only)
 DEFAULT_MODEL_PATH="$PWD/models"
 DEFAULT_IMAGE_TAG="latest"
 DEFAULT_IMAGE_REGISTRY="intel/"
 MODEL_PATH=""
 IMAGE_TAG=""
 PLUGINS="all"
-OVMS_RELEASE_TAG="v2025.4.1"
+OVMS_RELEASE_TAG="v2026.4.1"
 
 # Environment variables to pass (host mode)
 HF_TOKEN="${HUGGINGFACEHUB_API_TOKEN:-${HF_TOKEN:-}}"
 GETI_HOST="${GETI_HOST:-}"
 GETI_TOKEN="${GETI_TOKEN:-}"
 GETI_WORKSPACE_ID="${GETI_WORKSPACE_ID:-}"
+
+# HLS default URLs
+HLS_3D_POSE_CHECKPOINT_URL="https://storage.openvinotoolkit.org/repositories/open_model_zoo/public/2022.1/human-pose-estimation-3d-0001/human-pose-estimation-3d.tar.gz"
+HLS_ECG_BASE_URL="https://raw.githubusercontent.com/Einse57/OpenVINO_sample/master/ai-ecg-master"
+HLS_RPPG_MODEL_URL="https://github.com/xliucs/MTTS-CAN/raw/main/mtts_can.hdf5"
 
 # Error log file
 ERROR_LOG_DIR="${PWD}/.model_download_logs"
@@ -86,11 +91,11 @@ write_failure_logs() {
         return
     fi
     if [[ "$EXEC_MODE" == "host" ]]; then
-        if docker ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
+        if podman ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
             {
                 echo ""
                 echo "===== Container Logs ====="
-                docker logs "${CONTAINER_NAME}" 2>&1 | tail -100
+                podman logs "${CONTAINER_NAME}" 2>&1 | tail -100
             } >> "$ERROR_LOG_FILE" 2>/dev/null
         fi
     fi
@@ -109,12 +114,12 @@ show_usage() {
     echo -e "  ${CYAN}--revision${NC} <rev>           Model revision (branch, tag, or commit hash)"
     echo -e "  ${CYAN}--is-ovms${NC}                  Convert to OpenVINO format after downloading"
     echo -e "  ${CYAN}--precision${NC} <prec>         Weight precision: int4, int8, fp16, fp32 (default: int8)"
-    echo -e "  ${CYAN}--device${NC} <dev>             Target device: CPU, GPU, NPU (default: CPU)"
+    echo -e "  ${CYAN}--device${NC} <dev>             Target device: CPU, GPU, NPU, or HETERO:<dev>[,<dev>...] e.g. HETERO:GPU,CPU (default: CPU)"
     echo -e "  ${CYAN}--cache-size${NC} <gb>          KV cache size in GB (for LLM/VLM conversion)"
     echo -e "  ${CYAN}--config-json${NC} <json>       Additional config as inline JSON string\n"
-    echo -e "${BOLD}Docker Options:${NC}"
+    echo -e "${BOLD}podman Options:${NC}"
     echo -e "  ${CYAN}--model-path${NC} <path>        Host path for model storage (default: $DEFAULT_MODEL_PATH)"
-    echo -e "  ${CYAN}--image-tag${NC} <tag>          Docker image tag (default: $DEFAULT_IMAGE_TAG)"
+    echo -e "  ${CYAN}--image-tag${NC} <tag>          podman image tag (default: $DEFAULT_IMAGE_TAG)"
     echo -e "  ${CYAN}--plugins${NC} <list>           Comma-separated plugins to enable (default: all)"
     echo -e "  ${CYAN}--ovms-release-tag${NC} <tag>   OVMS release tag (default: $OVMS_RELEASE_TAG)\n"
     echo -e "  ${CYAN}--help${NC}                     Show this help message"
@@ -127,21 +132,12 @@ ORIGINAL_ARGS="$*"
 cleanup() {
     write_failure_logs
 
-    if [[ "$EXEC_MODE" == "host" ]]; then
-        if docker ps -q --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
-            log_info "Stopping container ${CONTAINER_NAME}..."
-            docker stop "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-        fi
-        if docker ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
-            docker rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-        fi
-    else
-        # Internal mode: stop background uvicorn
-        if [[ -n "${SERVICE_PID:-}" ]] && kill -0 "$SERVICE_PID" 2>/dev/null; then
-            log_info "Stopping background service (PID: $SERVICE_PID)..."
-            kill "$SERVICE_PID" 2>/dev/null || true
-            wait "$SERVICE_PID" 2>/dev/null || true
-        fi
+    # Keep host-mode containers running and available for repeated testing.
+    # Internal mode owns its uvicorn process, so stop that process on exit.
+    if [[ "$EXEC_MODE" == "internal" && -n "${SERVICE_PID:-}" ]] && kill -0 "$SERVICE_PID" 2>/dev/null; then
+        log_info "Stopping background service (PID: $SERVICE_PID)..."
+        kill "$SERVICE_PID" 2>/dev/null || true
+        wait "$SERVICE_PID" 2>/dev/null || true
     fi
 
     # Only keep the log file if there were errors
@@ -207,7 +203,7 @@ if [[ -z "$HUB" ]]; then
 fi
 
 # =============================================================================
-# HOST MODE: Start container via docker run, then interact with it
+# HOST MODE: Start container via podman run, then interact with it
 # =============================================================================
 start_service_host() {
     # Set defaults
@@ -238,14 +234,14 @@ start_service_host() {
 
     # Ensure model path exists
     mkdir -p "$MODEL_PATH"
+    chmod g+w "$MODEL_PATH" || {
+        log_error "Cannot grant group write access to model path: $MODEL_PATH"
+        exit 1
+    }
 
-    # Remove any existing ephemeral container
-    if docker ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
-        log_warning "Removing existing container: ${CONTAINER_NAME}"
-        docker rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
-    fi
 
-    # Build docker env args
+
+    # Build podman env args
     DOCKER_ENV_ARGS=(
         -e "ENABLED_PLUGINS=${PLUGINS}"
         -e "MODEL_PATH=/opt/models"
@@ -261,28 +257,42 @@ start_service_host() {
         DOCKER_ENV_ARGS+=(-e "GETI_TOKEN=${GETI_TOKEN}")
         DOCKER_ENV_ARGS+=(-e "GETI_WORKSPACE_ID=${GETI_WORKSPACE_ID}")
     fi
-
-    # Start the container (detached — docker handles image pull synchronously)
-    log_info "Starting container: ${BOLD}${CONTAINER_NAME}${NC} (pulling image if needed)..."
-
-    CONTAINER_ID=$(docker run -d --rm \
-        --name "${CONTAINER_NAME}" \
-        "${DOCKER_ENV_ARGS[@]}" \
-        -v "${MODEL_PATH}:/opt/models" \
-        -p "0:${SERVICE_PORT}" \
-        --group-add "$(id -g)" \
-        "${FULL_IMAGE}" \
-        --plugins "${PLUGINS}" 2>&1)
-
-    if [[ $? -ne 0 ]]; then
-        log_error "Failed to start container: $CONTAINER_ID"
-        exit 1
+    if [[ "${HUB,,}" == "hls" ]]; then
+        DOCKER_ENV_ARGS+=(-e "HLS_3D_POSE_CHECKPOINT_URL=${HLS_3D_POSE_CHECKPOINT_URL}")
+        DOCKER_ENV_ARGS+=(-e "HLS_ECG_BASE_URL=${HLS_ECG_BASE_URL}")
+        DOCKER_ENV_ARGS+=(-e "HLS_RPPG_MODEL_URL=${HLS_RPPG_MODEL_URL}")
     fi
 
-    HOST_PORT=$(docker port "${CONTAINER_NAME}" "${SERVICE_PORT}/tcp" 2>/dev/null | head -1 | cut -d: -f2)
+    # Start the container (detached — podman handles image pull synchronously)
+    log_info "Starting container: ${BOLD}${CONTAINER_NAME}${NC} (pulling image if needed)..."
+
+    # Remove any existing ephemeral container
+    if podman ps -aq --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
+        log_warning "Found existing container: ${CONTAINER_NAME}"
+        #podman rm -f "${CONTAINER_NAME}" > /dev/null 2>&1 || true
+    else
+        CONTAINER_ID=$(podman run -d \
+            --name "${CONTAINER_NAME}" \
+            --userns=keep-id \
+            "${DOCKER_ENV_ARGS[@]}" \
+            -v "${MODEL_PATH}:/opt/models:z" \
+            -p "${SERVICE_PORT}" \
+            --group-add "$(id -g)" \
+            "${FULL_IMAGE}" \
+            --plugins "${PLUGINS}" 2>&1)
+
+        if [[ $? -ne 0 ]]; then
+            log_error "Failed to start container: $CONTAINER_ID"
+            exit 1
+        fi
+    fi
+
+
+    HOST_PORT=$(podman port "${CONTAINER_NAME}" 2>/dev/null | head -1 | cut -d: -f2)
+    log_info "Container started: ${BOLD}${CONTAINER_NAME}${NC} (${HOST_PORT} -> ${SERVICE_PORT})"
     if [[ -z "$HOST_PORT" ]]; then
         log_error "Failed to get mapped port for container."
-        docker logs "${CONTAINER_NAME}" 2>&1 | tail -20
+        podman logs "${CONTAINER_NAME}" 2>&1 | tail -20
         exit 1
     fi
 
@@ -335,16 +345,16 @@ fi
 log_info "Waiting for service to become ready (timeout: ${HEALTH_TIMEOUT}s)..."
 elapsed=0
 while [ $elapsed -lt $HEALTH_TIMEOUT ]; do
-    if curl -sf "${SERVICE_URL}/health" > /dev/null 2>&1; then
+    if curl --noproxy '*' -4 -v -sf "${SERVICE_URL}/health" > /dev/null 2>&1; then
         log_success "Service is ready."
         break
     fi
 
     if [[ "$EXEC_MODE" == "host" ]]; then
         # Check if container is still running
-        if ! docker ps -q --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
+        if ! podman ps -q --filter "name=${CONTAINER_NAME}" 2>/dev/null | grep -q .; then
             log_error "Container stopped unexpectedly. Logs:"
-            docker logs "${CONTAINER_NAME}" 2>&1 | tail -30
+            podman logs "${CONTAINER_NAME}" 2>&1 | tail -30
             exit 1
         fi
     else
@@ -363,7 +373,7 @@ if [ $elapsed -ge $HEALTH_TIMEOUT ]; then
     log_error "Service failed to start within ${HEALTH_TIMEOUT}s."
     if [[ "$EXEC_MODE" == "host" ]]; then
         log_error "Container logs:"
-        docker logs "${CONTAINER_NAME}" 2>&1 | tail -30
+        podman logs "${CONTAINER_NAME}" 2>&1 | tail -30
     fi
     exit 1
 fi
@@ -426,7 +436,7 @@ if [[ -n "$DOWNLOAD_PATH" ]]; then
 fi
 
 # Use -w to capture HTTP status code, -s for silent, no -f so we get response body on errors
-HTTP_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+HTTP_RESPONSE=$(curl --noproxy '*' -4 -v -s -w "\n%{http_code}" -X POST \
     "${SERVICE_URL}/models/download?download_path=${ENCODED_PATH}" \
     -H "Content-Type: application/json" \
     -d "$PAYLOAD")
@@ -478,7 +488,7 @@ while [[ "$ALL_DONE" != true ]]; do
     ALL_DONE=true
 
     for JOB_ID in $JOB_IDS; do
-        JOB_STATUS=$(curl -s "${SERVICE_URL}/jobs/$JOB_ID")
+        JOB_STATUS=$(curl --noproxy '*' -4 -v -s "${SERVICE_URL}/jobs/$JOB_ID")
         if [[ -z "$JOB_STATUS" ]]; then
             log_warning "Job $JOB_ID: no response from server, retrying..."
             ALL_DONE=false

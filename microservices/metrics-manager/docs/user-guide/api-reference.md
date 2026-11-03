@@ -62,6 +62,34 @@ curl http://localhost:9090/api/v1/stats
 }
 ```
 
+## Intel GPU Engine Busy Metrics
+
+The bundled Telegraf configuration reads `intel_gpu_top` JSON samples and
+publishes engine busy percentages for each available `/dev/dri/cardN` device.
+Only the busy percentage is collected. The Prometheus endpoint exposes each
+engine as `intel_gpu_engine_busy_percent` with `engine`, `gpu_id`, and `host`
+labels:
+
+```text
+intel_gpu_engine_busy_percent{engine="Render/3D",gpu_id="1",host="edge-host"} 0
+```
+
+Check the metric with:
+
+```bash
+curl -s http://localhost:9273/metrics | grep '^intel_gpu_engine_busy_percent'
+```
+
+The same metric is included in the Metrics Manager SSE stream on port 9090:
+
+```bash
+curl -Ns -H "Accept: text/event-stream" \
+  http://localhost:9090/metrics/stream | grep --line-buffered 'intel_gpu_engine_busy_percent'
+```
+
+This requires `/dev/dri` access and working Intel GPU performance counters.
+If no GPU is present, the reader stays idle and other metrics continue.
+
 ---
 
 ## Push Metrics

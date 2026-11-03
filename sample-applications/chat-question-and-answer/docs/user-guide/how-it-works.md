@@ -33,7 +33,7 @@ The Chat Q&A application is a combination of the core LangChain application logi
      > Sometimes, even certain static Wikipedia pages may not yield meaningful content, as the current HTML-to-text conversion can extract navigation menus or metadata instead of the main article body. Since URL processing is primarily a proof of concept, it can be extended based on specific use cases by enhancing the document-ingestion microservice capabilities.
 
 2. **Create the context**
-   - **Upload input documents and web links**: The UI microservice allows the developer to interact with the Chat Q&A backend. It provides the interface to upload the documents and weblinks on which the RAG pipeline will be executed. The documents are uploaded and stored in object store. MinIO is the database used for object store.
+   - **Upload input documents and web links**: The UI microservice allows the developer to interact with the Chat Q&A backend. It provides the interface to upload the documents and weblinks on which the RAG pipeline will be executed. The documents are uploaded and stored in an S3-compatible object store (RustFS in Docker Compose, MinIO in Helm).
    - **Convert to embeddings space**: The Chat Q&A backend microservice creates the embeddings out of the uploaded documents and web pages using the document ingestion microservice. The Embeddings microservice is used to create the embeddings. The embeddings are stored in a vector database. PGVector is used in the sample application.
 3. **Chat flow**
    - **Ask a query**: The UI microservice provides prompt window in which the query is asked.
@@ -41,15 +41,25 @@ The Chat Q&A application is a combination of the core LangChain application logi
      - Continue conversations across sessions
      - View and manage multiple conversation threads
      - Switch between conversations and access previous questions and responses for context
+   - **Accounts**: On first launch, create an account with a username and password. On later visits, log in with the same credentials. Password hashes, account records, sessions, and each user's conversation history are stored in the PostgreSQL database. The UI uses an HTTP-only session cookie and displays the signed-in username in the header; use its menu to log out. Usernames are case-insensitive and 3–32 characters (`A-Z`, `a-z`, digits, `.`, `_`, `-`); passwords must be 8–128 characters.
    - **Execute the RAG AI pipeline**: The Chat Q&A backend microservice performs the following actions to generate the output response using the RAG pipeline.
       -   The query is converted into embedding space using the Embeddings microservice.
       - Semantic retrieval is done to fetch the relevant documents or data points from VectorDB. The reranker microservice ranks them in order of accuracy.
       - The retrieved documents and data points is used as part of the prompt to the LLM model and a response is generated using the LLM microservice which hosts the configured LLM model.
+   - **Optional file attachments**: Use the paperclip beside the prompt to upload a local PDF, TXT, or DOCX file, or select a file already in the Data Source library. Uploaded files are added to that shared library and embedded by the document-ingestion service (maximum upload size: 100 MB). Retrieval for that question is limited to its selected files; if no file is attached, the application keeps its existing retrieval across the shared knowledge base. Retrieved text is included in the LLM prompt alongside the question and model knowledge.
 4. **Output Generation**:
    - **Response**: The generated response from the LLM microservice is sent to the UI for display and consumption by the user.
    - **Observability dashboard**: If set up, the dashboard displays real-time logs, metrics, and traces providing a view of the performance, accuracy, and resource consumption by the application.
 
-> **Note**: The application stores Redux state in localStorage to preserve chat data across page reloads. Since localStorage is managed by the browser and not cleared when containers are restarted, previously saved state may still appear after a restart. If you see old chats or outdated data, please clear your browser’s localStorage to reset the session.
+Conversation history is synchronized to the pgvector PostgreSQL database and restored after login. History is scoped to the account, not the browser. The Compose deployment stores PostgreSQL data in the `pgvector-data` named volume, which survives `docker compose down` and container recreation; `docker compose down -v` removes it. Chat messages are no longer persisted in browser localStorage.
+
+Create an optional host-side database dump while the database is running:
+
+```bash
+bash scripts/backup-pgvector.sh
+```
+
+The dump is written to `backups/` by default (or to the directory passed as the script's first argument). It includes account records, sessions, vector data, and conversation history. The database stores password hashes rather than plaintext passwords. For deployments served over HTTPS, set `AUTH_COOKIE_SECURE=true` in `.env` so session cookies are restricted to secure connections. This sample does not include password reset or account recovery.
 
 The application flow is illustrated in the flow diagram below. The diagram shows the API used and the data sharing protocol.
 ![Data flow diagram](./_assets/request.jpg)

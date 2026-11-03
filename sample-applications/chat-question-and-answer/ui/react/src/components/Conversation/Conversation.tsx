@@ -1,18 +1,41 @@
 // Copyright (C) 2024 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 
-import { KeyboardEventHandler, SyntheticEvent, useEffect, useRef, useState } from 'react'
+import { ChangeEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 import styleClasses from "../../styles/components/conversation.module.scss"
-import { ActionIcon, Textarea, rem, Anchor } from '@mantine/core'
-import { IconArrowRight } from '@tabler/icons-react'
-import { conversationSelector, doConversation, newConversation, fetchModelName } from '../../redux/Conversation/ConversationSlice'
+import {
+  ActionIcon,
+  Anchor,
+  Badge,
+  Button,
+  Checkbox,
+  Divider,
+  FileInput,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  Textarea,
+  rem,
+} from '@mantine/core'
+import { IconArrowRight, IconPaperclip, IconX } from '@tabler/icons-react'
+import {
+  conversationSelector,
+  doConversation,
+  newConversation,
+  fetchModelName,
+  fetchInitialFiles,
+  uploadFile,
+} from '../../redux/Conversation/ConversationSlice'
 import { ConversationMessage } from '../Message/conversationMessage'
 import { useAppDispatch, useAppSelector } from '../../redux/store'
-import { Message, MessageRole } from '../../redux/Conversation/Conversation'
-import { getCurrentTimeStamp } from '../../utils/util'
+import { File as DataSourceFile, Message, MessageRole } from '../../redux/Conversation/Conversation'
+import { extractOriginalFilename, getCurrentTimeStamp } from '../../utils/util'
 import { useDisclosure } from '@mantine/hooks'
 import DataSource from '../Drawer/DataSource'
 import { ConversationSideBar } from './ConversationSideBar'
+import { notifications } from '@mantine/notifications'
+import { MAX_FILE_SIZE, plainAcceptedFormat } from '../../utils/constant'
 
 
 type ConversationProps = {
@@ -24,23 +47,33 @@ const Conversation = ({ title }: ConversationProps) => {
   title = title //fix this
   const [prompt, setPrompt] = useState<string>("")
   const [hasLLMResponse, setHasLLMResponse] = useState<boolean>(false)
+  const [attachmentPickerOpened, setAttachmentPickerOpened] = useState(false)
+  const [localFile, setLocalFile] = useState<globalThis.File | null>(null)
+  const [pendingAttachments, setPendingAttachments] = useState<DataSourceFile[]>([])
+  const [fileListLoading, setFileListLoading] = useState(false)
+  const [fileListError, setFileListError] = useState("")
   const promptInputRef = useRef<HTMLTextAreaElement>(null)
   const [fileUploadOpened, { close: closeFileUpload }] = useDisclosure(false);
 
-  const { conversations, onGoingResults, selectedConversationId, modelName, isGenerating } = useAppSelector(conversationSelector)
+  const {
+    conversations,
+    onGoingResults,
+    selectedConversationId,
+    modelName,
+    isGenerating,
+    files,
+    isUploading,
+    isWaitingForFirstToken,
+  } = useAppSelector(conversationSelector)
   const dispatch = useAppDispatch();
   const selectedConversation = conversations.find((x: any) => x.conversationId === selectedConversationId)
+  const isAnyConversationWaitingForFirstToken = Object.values(isWaitingForFirstToken).some(Boolean)
 
   const LLM_MODEL_URL = `https://huggingface.co/${modelName}`;
 
   const scrollViewport = useRef<HTMLDivElement>(null)
 
   const toSend = "Enter"
-
-  const systemPrompt: Partial<Message> = {
-    role: MessageRole.System,
-    content: "You are helpful assistant",
-  };
 
   // Fetch model name
   useEffect(() => {
@@ -57,27 +90,51 @@ const Conversation = ({ title }: ConversationProps) => {
     }
   }, [selectedConversation?.Messages]);
 
+  useEffect(() => {
+    if (!attachmentPickerOpened) {
+      return
+    }
+    setFileListLoading(true)
+    setFileListError("")
+    void dispatch(fetchInitialFiles())
+      .unwrap()
+      .catch(() => setFileListError("Could not load the indexed files. Try again."))
+      .finally(() => setFileListLoading(false))
+  }, [attachmentPickerOpened, dispatch])
+
+
+  const sameFile = (left: DataSourceFile, right: DataSourceFile) =>
+    left.file_name === right.file_name && left.bucket_name === right.bucket_name
 
   const handleSubmit = () => {
+    if (!prompt.trim() || isUploading) {
+      return
+    }
 
     const userPrompt: Message = {
       role: MessageRole.User,
       content: prompt,
-      time: getCurrentTimeStamp()
+      time: getCurrentTimeStamp(),
+      attachments: pendingAttachments,
     };
-    let messages: Partial<Message>[] = [];
-    if (selectedConversation) {
-      messages = selectedConversation.Messages.map((message: any) => {
-        return { role: message.role, content: message.content }
-      })
-    }
-
-    messages = [systemPrompt, ...messages]
-
-    dispatch(doConversation({
+    const submittedAttachments = [...pendingAttachments]
+    const submission = dispatch(doConversation({
       conversationId: selectedConversationId,
       userPrompt,
+      attachments: submittedAttachments,
     }))
+    setPendingAttachments((current) =>
+      current.filter((file) => !submittedAttachments.some((submitted) => sameFile(file, submitted))),
+    )
+    void submission.unwrap().catch(() => {
+      setPendingAttachments((current) => [
+        ...current,
+        ...submittedAttachments.filter(
+          (submitted) => !current.some((file) => sameFile(file, submitted)),
+        ),
+      ])
+    })
+    setAttachmentPickerOpened(false)
     setPrompt("")
   }
 
@@ -89,12 +146,10 @@ const Conversation = ({ title }: ConversationProps) => {
     scrollToBottom()
   }, [onGoingResults?.[selectedConversationId], selectedConversation?.Messages])
 
-  const handleKeyDown: KeyboardEventHandler = (event: any) => {
+  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (!event.shiftKey && event.key === toSend) {
+      event.preventDefault()
       handleSubmit()
-      setTimeout(() => {
-        setPrompt("")
-      }, 1)
     }
   }
 
@@ -103,9 +158,59 @@ const Conversation = ({ title }: ConversationProps) => {
     dispatch(newConversation())
   }
 
-  const handleChange = (event: SyntheticEvent) => {
-    event.preventDefault()
-    setPrompt((event.target as HTMLTextAreaElement).value)
+  const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
+    setPrompt(event.currentTarget.value)
+  }
+
+  const handleAttachmentPickerChange = (opened: boolean) => {
+    setAttachmentPickerOpened(opened)
+  }
+
+  const handleUploadAndAttach = async () => {
+    if (!localFile) {
+      return
+    }
+
+    if (localFile.size > MAX_FILE_SIZE * 1024 * 1024) {
+      notifications.show({
+        color: "red",
+        title: "File size exceeded",
+        message: `Choose a file smaller than ${MAX_FILE_SIZE} MB.`,
+      })
+      setLocalFile(null)
+      return
+    }
+
+    try {
+      const response = await dispatch(uploadFile({ file: localFile })).unwrap()
+      const uploadedFiles = response.files
+      if (!uploadedFiles?.length) {
+        throw new Error("The upload completed, but DataPrep did not return the indexed file identifier.")
+      }
+
+      setPendingAttachments((current) => [
+        ...current,
+        ...uploadedFiles.filter(
+          (uploaded) => !current.some((file) => sameFile(file, uploaded)),
+        ),
+      ])
+      setLocalFile(null)
+      dispatch(fetchInitialFiles())
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "The file could not be attached."
+      notifications.show({ color: "red", message })
+    }
+  }
+
+  const toggleLibraryAttachment = (file: DataSourceFile, checked: boolean) => {
+    setPendingAttachments((current) => {
+      if (checked) {
+        return current.some((attachment) => sameFile(attachment, file))
+          ? current
+          : [...current, file]
+      }
+      return current.filter((attachment) => !sameFile(attachment, file))
+    })
   }
   return (
     <div className={styleClasses.conversationWrapper}>
@@ -134,6 +239,7 @@ const Conversation = ({ title }: ConversationProps) => {
                   human={message.role == MessageRole.User}
                   message={message.content}
                   responseTimeMs={message.responseTimeMs}
+                  attachments={message.attachments}
                 />
               )
             })}
@@ -159,6 +265,28 @@ const Conversation = ({ title }: ConversationProps) => {
           </div>
 
           <div className={styleClasses.conversationActions}>
+            {pendingAttachments.length > 0 && (
+              <Group gap="xs" mb="xs">
+                {pendingAttachments.map((file) => (
+                  <Badge
+                    key={`${file.bucket_name}/${file.file_name}`}
+                    variant="light"
+                    rightSection={
+                      <ActionIcon
+                        size="xs"
+                        variant="subtle"
+                        aria-label={`Remove ${extractOriginalFilename(file.file_name)}`}
+                        onClick={() => toggleLibraryAttachment(file, false)}
+                      >
+                        <IconX size={12} />
+                      </ActionIcon>
+                    }
+                  >
+                    {extractOriginalFilename(file.file_name)}
+                  </Badge>
+                ))}
+              </Group>
+            )}
             <Textarea
               classNames={{
                 root: styleClasses.promptRoot,
@@ -173,11 +301,72 @@ const Conversation = ({ title }: ConversationProps) => {
               autosize
               minRows={1}
               maxRows={4}
+              leftSectionWidth={42}
+              leftSection={
+                <div className={styleClasses.attachmentPickerAnchor}>
+                    <ActionIcon
+                      variant="subtle"
+                      aria-label="Attach files"
+                      title="Attach files"
+                      aria-expanded={attachmentPickerOpened}
+                      onClick={() => handleAttachmentPickerChange(!attachmentPickerOpened)}
+                    >
+                      <IconPaperclip style={{ width: rem(18), height: rem(18) }} stroke={1.5} />
+                    </ActionIcon>
+                  {attachmentPickerOpened && (
+                  <div className={styleClasses.attachmentPicker} role="dialog" aria-label="Attach files">
+                    <Stack gap="sm">
+                      <Text size="sm" fw={600}>Attach files to this question</Text>
+                      <FileInput
+                        value={localFile}
+                        onChange={setLocalFile}
+                        accept={plainAcceptedFormat.join(",")}
+                        placeholder="Choose a local file"
+                        clearable
+                      />
+                      <Text size="xs" c="dimmed">PDF, TXT, or DOCX; maximum {MAX_FILE_SIZE} MB.</Text>
+                      <Button
+                        size="xs"
+                        onClick={handleUploadAndAttach}
+                        disabled={!localFile || isUploading || isAnyConversationWaitingForFirstToken}
+                        loading={isUploading}
+                      >
+                        Upload and attach
+                      </Button>
+                      <Divider />
+                      <Text size="xs" fw={600}>Or choose an indexed file</Text>
+                      {fileListLoading ? (
+                        <Loader size="sm" />
+                      ) : fileListError ? (
+                        <Text size="xs" c="red">{fileListError}</Text>
+                      ) : files.length === 0 ? (
+                        <Text size="xs" c="dimmed">No indexed files are available yet.</Text>
+                      ) : (
+                        <div className={styleClasses.attachmentFileList}>
+                          <Stack gap="xs">
+                            {files.map((file) => (
+                              <Checkbox
+                                key={`${file.bucket_name}/${file.file_name}`}
+                                checked={pendingAttachments.some((attachment) => sameFile(attachment, file))}
+                                onChange={(event) => toggleLibraryAttachment(file, event.currentTarget.checked)}
+                                label={extractOriginalFilename(file.file_name)}
+                              />
+                            ))}
+                          </Stack>
+                        </div>
+                      )}
+                    </Stack>
+                  </div>
+                  )}
+                </div>
+              }
               rightSectionWidth={42}
               rightSection={
                 <ActionIcon
                   className={styleClasses.sendButton}
                   onClick={handleSubmit}
+                  disabled={!prompt.trim() || isUploading}
+                  aria-label="Send question"
                   size={28}
                   radius={7}
                   variant="filled"

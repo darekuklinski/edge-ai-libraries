@@ -21,10 +21,11 @@ type GpuSeries = {
 }
 
 type GpuMetricCardProps = {
+  title: string
   series: GpuSeries[]
 }
 
-export function GpuMetricCard({ series }: GpuMetricCardProps) {
+export function GpuMetricCard({ title, series }: GpuMetricCardProps) {
   const labels = Array.from(
     { length: Math.max(...series.map(({ data }) => data.length), 0) },
     () => ""
@@ -98,21 +99,23 @@ export function GpuMetricCard({ series }: GpuMetricCardProps) {
 
   return (
     <div className={classes.gpuCard}>
-      <div className={classes.gpuHeader}>
-        <span className={classes.gpuTitle}>GPU engines</span>
+      <div className={classes.gpuMain}>
+        <div className={classes.gpuHeader}>
+          <span className={classes.gpuTitle} title={title}>{title}</span>
+        </div>
 
-        <div className={classes.gpuLegend}>
-          {series.map(({ label, color }) => (
-            <div className={classes.gpuLegendItem} key={label}>
-              <span className={classes.gpuLegendDot} style={{ backgroundColor: color }} />
-              <span>{label}</span>
-            </div>
-          ))}
+        <div className={classes.chartWrap}>
+          <Line data={chartData} options={options} />
         </div>
       </div>
 
-      <div className={classes.chartWrap}>
-        <Line data={chartData} options={options} />
+      <div className={classes.gpuLegend}>
+        {series.map(({ label, color }) => (
+          <div className={classes.gpuLegendItem} key={label}>
+            <span className={classes.gpuLegendDot} style={{ backgroundColor: color }} />
+            <span>{label}</span>
+          </div>
+        ))}
       </div>
     </div>
   )

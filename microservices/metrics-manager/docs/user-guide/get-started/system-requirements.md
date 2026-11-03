@@ -84,7 +84,7 @@ If NPU is absent or driver is not loaded, the NPU reader logs a warning and ente
 - [ ] Docker Compose installed: `docker compose version`
 - [ ] At least 512 MB RAM available: `free -h`
 - [ ] At least 2 GB disk space: `df -h /`
-- [ ] (Optional) Intel GPU: `lspci | grep -i intel | grep -i graphics`
+- [ ] (Optional) Intel GPU: `lspci | grep -i intel | grep -Ei 'graphics|VGA'` (covers older Arc A-series devices listed as VGA controllers)
 - [ ] (Optional) Intel NPU driver: `ls /sys/bus/pci/drivers/intel_vpu/`
 
 If all checks pass, you are ready to proceed with the [Get Started Guide](../get-started.md).

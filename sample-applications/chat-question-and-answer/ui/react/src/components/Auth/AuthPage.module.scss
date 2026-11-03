@@ -1,0 +1,29 @@
+.authPage {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: #070d2d;
+}
+
+.authCard {
+  width: min(100%, 420px);
+  padding: 32px;
+  border: 1px solid #26315b;
+  border-radius: 12px;
+  background: #101735;
+  color: #e8eaf0;
+}
+
+.modeToggle {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #80c9ff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.modeToggle:hover {
+  text-decoration: underline;
+}

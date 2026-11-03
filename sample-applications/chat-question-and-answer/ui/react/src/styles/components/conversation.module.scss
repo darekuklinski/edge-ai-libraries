@@ -68,7 +68,7 @@
     border-radius: 10px !important;
     color: #c8d4f0 !important;
     font-size: 13px !important;
-    padding: 10px 48px 10px 12px !important;
+    padding: 10px 48px 10px 46px !important;
     box-shadow: none !important;
 
     &::placeholder {
@@ -87,6 +87,28 @@
     display: flex;
     align-items: center;
     justify-content: center;
+}
+
+.attachmentPickerAnchor {
+    position: relative;
+}
+
+.attachmentPicker {
+    position: absolute;
+    z-index: 20;
+    bottom: calc(100% + 10px);
+    left: 0;
+    width: min(360px, calc(100vw - 32px));
+    padding: 12px;
+    border: 1px solid #1b2652;
+    border-radius: 10px;
+    background: #141f45;
+    box-shadow: 0 8px 24px rgb(0 0 0 / 30%);
+}
+
+.attachmentFileList {
+    max-height: 160px;
+    overflow-y: auto;
 }
 
 .sendButton {

@@ -21,6 +21,13 @@ export type MetricsPoint = {
 };
 
 const MAX_POINTS = 20;
+const GPU_ENGINE_ALIASES: Record<GpuEngine, string[]> = {
+  bcs: ["bcs", "copy", "Blitter"],
+  rcs: ["rcs", "render", "Render/3D"],
+  ccs: ["ccs", "compute", "Compute"],
+  vcs: ["vcs", "video", "Video"],
+  vecs: ["vecs", "videoenhance", "videoenhancement", "VideoEnhance", "VideoEnhancement"],
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -52,12 +59,66 @@ function normalizeGpuMetrics(value: unknown): GpuMetricsPoint {
 }
 
 export function parseMetricsPoint(raw: Record<string, unknown>): MetricsPoint {
+  const samples = Array.isArray(raw.metrics) ? raw.metrics.filter(isRecord) : [];
+  const metricValue = (name: string, labelName?: string, labelValue?: string): MetricValue => {
+    const matchingSamples = samples.filter((sample) => {
+      if (sample.name !== name) {
+        return false;
+      }
+
+      if (!labelName) {
+        return true;
+      }
+
+      const labels = isRecord(sample.labels) ? sample.labels : {};
+      return labels[labelName] === labelValue;
+    });
+
+    const totalCpuSample = matchingSamples.find((sample) => {
+      const labels = isRecord(sample.labels) ? sample.labels : {};
+      return labels.cpu === "cpu-total";
+    });
+    const selectedSample = totalCpuSample ?? matchingSamples[0];
+    return selectedSample ? normalizeValue(selectedSample.value) : "N/A";
+  };
+
+  const cpuUsage = [
+    metricValue("cpu_usage_user", "cpu", "cpu-total"),
+    metricValue("cpu_usage_system", "cpu", "cpu-total"),
+  ].filter((value): value is number => typeof value === "number");
+  const cpuIdle = metricValue("cpu_usage_idle", "cpu", "cpu-total");
+  const cpu = cpuUsage.length
+    ? cpuUsage.reduce((total, value) => total + value, 0)
+    : typeof cpuIdle === "number"
+      ? 100 - cpuIdle
+      : normalizeValue(raw.cpu);
+
+  const fallbackGpu = normalizeGpuMetrics(raw.gpu);
+  const gpu = Object.fromEntries(
+    GPU_ENGINES.map((engine) => {
+      const aliases = GPU_ENGINE_ALIASES[engine];
+      const values = samples
+        .filter((sample) => sample.name === "gpu_engine_usage_usage")
+        .filter((sample) => {
+          const labels = isRecord(sample.labels) ? sample.labels : {};
+          const metricEngine = String(labels.engine ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
+          return aliases.includes(metricEngine);
+        })
+        .map((sample) => normalizeValue(sample.value))
+        .filter((value): value is number => typeof value === "number");
+      return [engine, values.length ? Math.max(...values) : fallbackGpu[engine]];
+    })
+  ) as GpuMetricsPoint;
+
+  const npu = metricValue("npu_utilization");
+  const ram = metricValue("mem_used_percent");
+
   return {
-    timestamp: typeof raw.timestamp === "string" ? raw.timestamp : "",
-    cpu: normalizeValue(raw.cpu),
-    gpu: normalizeGpuMetrics(raw.gpu),
-    npu: normalizeValue(raw.npu),
-    ram: normalizeValue(raw.ram),
+    timestamp: raw.timestamp == null ? "" : String(raw.timestamp),
+    cpu,
+    gpu,
+    npu: npu === "N/A" ? normalizeValue(raw.npu) : npu,
+    ram: ram === "N/A" ? normalizeValue(raw.ram) : ram,
   };
 }
 

@@ -8,10 +8,24 @@ chain_stub.process_chunks = lambda *_args, **_kwargs: iter([])
 sys.modules["app.chain"] = chain_stub
 
 # application packages
-from app.server import app
+from app.server import app, require_user
 
-@pytest.fixture(scope="module")
+@pytest.fixture
 def test_client():
     """A fixture to help send HTTP REST requests to API endpoints."""
     client = TestClient(app)
     yield client
+
+
+@pytest.fixture
+def authenticated_client(test_client):
+    previous_override = app.dependency_overrides.get(require_user)
+    app.dependency_overrides[require_user] = lambda: {
+        "id": 7,
+        "username": "test-user",
+    }
+    yield test_client
+    if previous_override is None:
+        app.dependency_overrides.pop(require_user, None)
+    else:
+        app.dependency_overrides[require_user] = previous_override

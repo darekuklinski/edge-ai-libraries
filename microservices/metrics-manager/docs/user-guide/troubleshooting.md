@@ -112,11 +112,22 @@ FILE_PERSIST_DEBOUNCE_MS=10 docker compose up
 **Check:**
 
 ```bash
-# Verify Intel GPU is present
-lspci | grep -i intel | grep -i graphics
+# Verify Intel GPU is present (newer devices may say "Graphics"; older Arc A-series
+# devices may be listed as "VGA compatible controller")
+lspci | grep -i intel | grep -Ei 'graphics|VGA'
 
 # Check qmassa FIFO exists
 docker exec metrics-manager ls -la /app/qmassa.fifo
+
+# Check intel-gpu-top engine busy metrics
+curl -s http://localhost:9273/metrics | grep '^intel_gpu_engine_busy_percent'
+
+# Check the same metrics through the Metrics Manager SSE stream
+curl -Ns -H "Accept: text/event-stream" \
+  http://localhost:9090/metrics/stream | grep --line-buffered 'intel_gpu_engine_busy_percent'
+
+# Check the reader process
+docker exec metrics-manager ps -ef | grep '[i]ntel_gpu_top_reader'
 
 # Check if qmassa is running
 docker exec metrics-manager supervisorctl -c /etc/supervisor/supervisord.conf status qmassa

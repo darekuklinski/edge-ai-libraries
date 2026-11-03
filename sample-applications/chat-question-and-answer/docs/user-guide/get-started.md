@@ -148,10 +148,26 @@ Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to 
     # embedding: OVMS
     ```
 
+   When launching Compose directly instead of using `setup.sh`, keep `DEVICE`, `COMPOSE_PROFILES`, and `STARTUP_MODELS_CONFIG_HOST_PATH` aligned in `.env`:
+
+   | Device | `COMPOSE_PROFILES` | `STARTUP_MODELS_CONFIG_HOST_PATH` |
+   | --- | --- | --- |
+   | CPU | `OVMS` | `./startup-models-cpu.yaml` |
+   | GPU | `GPU-OVMS` | `./startup-models-gpu.yaml` |
+
+   The GPU OVMS profile exposes `/dev/dri`. Selecting the CPU OVMS profile with GPU-configured models leaves OVMS without a GPU device and can make it terminate during model initialization.
+
 5. **Start the Application**:
    Start the application using Docker Compose:
 
    ```bash
+   docker compose up
+   ```
+
+   If you changed the `metrics-manager` Dockerfile, rebuild that service first; plain `docker compose up` may reuse an older image:
+
+   ```bash
+   docker compose build metrics-manager
    docker compose up
    ```
 
