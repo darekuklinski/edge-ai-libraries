@@ -9,6 +9,7 @@ import Conversation from "./components/Conversation/Conversation"
 import { Notifications, notifications } from '@mantine/notifications';
 import { Navbar } from "./components/Navbar/Navbar";
 import { MetricsPanel } from "./components/Metrics/MetricsPanel"
+import { SettingsPage } from "./components/Settings/SettingsPage"
 import { useAppDispatch, useAppSelector } from "./redux/store";
 import {
   clearConversations,
@@ -16,7 +17,7 @@ import {
   restoreConversationHistory,
 } from "./redux/Conversation/ConversationSlice";
 import { AuthPage, type Account } from "./components/Auth/AuthPage";
-import { AUTH_URL } from "./config";
+import { AUTH_URL, HEALTH_CHECK_URL } from "./config";
 import client from "./utils/client";
 import axios from "axios";
 
@@ -31,6 +32,8 @@ function App() {
   const [checkingSession, setCheckingSession] = useState(true);
   const [historyReady, setHistoryReady] = useState(false);
   const [historyError, setHistoryError] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
+  const [inferenceUnavailable, setInferenceUnavailable] = useState(false);
   const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
   const saveErrorShown = useRef(false);
 
@@ -78,6 +81,34 @@ function App() {
       return;
     }
 
+    let active = true;
+    const checkInferenceHealth = () => {
+      void client.get(HEALTH_CHECK_URL)
+        .then(() => {
+          if (active) {
+            setInferenceUnavailable(false);
+          }
+        })
+        .catch(() => {
+          if (active) {
+            setInferenceUnavailable(true);
+          }
+        });
+    };
+
+    checkInferenceHealth();
+    const interval = window.setInterval(checkInferenceHealth, 15000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [account?.id, historyReady]);
+
+  useEffect(() => {
+    if (!account || !historyReady) {
+      return;
+    }
+
     const timeout = window.setTimeout(() => {
       const save = saveQueue.current
         .catch(() => undefined)
@@ -109,6 +140,7 @@ function App() {
       await client.post(`${AUTH_URL}/logout`);
       dispatch(clearConversations());
       setAccount(null);
+      setShowSettings(false);
       setHistoryReady(false);
     } catch {
       notifications.show({
@@ -159,11 +191,47 @@ function App() {
         </Center>
       ) : (
         <div className="app-shell">
-          <Navbar username={account.username} onLogout={() => void logout()} />
-          <div className="chat-container">
-            <Conversation title={title} />
-          </div>
-          <MetricsPanel />
+          <Navbar
+            username={account.username}
+            onSettings={() => setShowSettings(true)}
+            onLogout={() => void logout()}
+          />
+          {inferenceUnavailable && (
+            <Alert
+              color="yellow"
+              title="Inference service unavailable"
+              role="status"
+              aria-live="polite"
+            >
+              Chat and document search are unavailable while the model services
+              start or recover. If a model download was rate-limited or requires
+              authentication, save a token in Settings → Hugging Face, then
+              retry the model in Settings → Models. Public models do not require
+              a token.
+              <Button
+                size="xs"
+                variant="light"
+                mt="sm"
+                onClick={() => setShowSettings((current) => !current)}
+              >
+                {showSettings ? "Return to chat" : "Open settings"}
+              </Button>
+            </Alert>
+          )}
+          {showSettings ? (
+            <SettingsPage
+              onBack={() => setShowSettings(false)}
+              isAdmin={account.role === "admin"}
+              currentUserId={account.id}
+            />
+          ) : (
+            <>
+              <div className="chat-container">
+                <Conversation title={title} />
+              </div>
+              <MetricsPanel />
+            </>
+          )}
         </div>
       )}
     </MantineProvider>

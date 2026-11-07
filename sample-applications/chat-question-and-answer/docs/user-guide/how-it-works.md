@@ -41,7 +41,88 @@ The Chat Q&A application is a combination of the core LangChain application logi
      - Continue conversations across sessions
      - View and manage multiple conversation threads
      - Switch between conversations and access previous questions and responses for context
-   - **Accounts**: On first launch, create an account with a username and password. On later visits, log in with the same credentials. Password hashes, account records, sessions, and each user's conversation history are stored in the PostgreSQL database. The UI uses an HTTP-only session cookie and displays the signed-in username in the header; use its menu to log out. Usernames are case-insensitive and 3–32 characters (`A-Z`, `a-z`, digits, `.`, `_`, `-`); passwords must be 8–128 characters.
+   - **Accounts**: Before first use, configure `CHATQNA_ADMIN_PASSWORD` in Compose `.env` or provide the Helm Secret named by `global.adminPasswordSecretName` with a `password` entry. This securely provisions the default `admin` account during first authentication when the database has not already been initialized. It does not reset an existing account's password when a deployment reuses its PostgreSQL volume. Until setup is complete, login and account creation are disabled and return a generic service setup error. After setup, public sign-up creates standard accounts only. Administrators can use Settings → Admin to create admin accounts and promote or downgrade existing accounts; only administrators can remove installed OVMS models from the server and database. Password hashes, account groups, sessions, and each user's conversation history are stored in PostgreSQL. The UI uses an HTTP-only session cookie and displays the signed-in username in the header; use its menu to log out. Passwords must be 8–128 characters when creating an account or changing a password.
+
+### Account groups and administrator tasks
+
+Chat Q&A has two account groups:
+
+- **Standard**: the group assigned to every account created through the public
+  sign-up form. Standard users can use the chat, manage their own password and
+  Hugging Face token, and request or select models.
+- **Admin**: can do everything a standard user can, and can open Settings →
+  **Admin** to review accounts, promote or downgrade users, or create an
+  administrator account. Admins can also remove installed OVMS models from
+  Settings → **Models**.
+
+The bootstrap `admin` account is assigned to the Admin group. The Admin tab is
+only shown to administrators, but the backend independently authorizes every
+administrative API request. At least one administrator must remain, and an
+administrator cannot remove their own administrator privileges.
+
+For automation, the authenticated API is rooted at `/v1/chatqna`. Sign in first
+to receive the HTTP-only `chatqna_session` cookie. Public registration has no
+role field and always creates a standard account:
+
+```bash
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' -c chatqna.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"new-user","password":"replace-with-a-unique-password"}' \
+  http://localhost:8100/v1/chatqna/auth/register
+```
+
+Use the browser sign-in flow or `/auth/login` to authenticate an existing
+administrator. For example, sign in and save the session cookie with:
+
+```bash
+curl -sS -o /dev/null -w 'HTTP %{http_code}\n' -c admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"replace-with-the-admin-password"}' \
+  http://localhost:8100/v1/chatqna/auth/login
+```
+
+Keep the cookie jar private. An administrator can list accounts,
+promote an account, or create another administrator as follows:
+
+```bash
+curl -b admin.cookies http://localhost:8100/v1/chatqna/admin/users
+
+curl -X PUT -b admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"admin"}' \
+  http://localhost:8100/v1/chatqna/admin/users/42/role
+
+curl -X POST -b admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"backup-admin","password":"replace-with-a-unique-password"}' \
+  http://localhost:8100/v1/chatqna/admin/users
+```
+
+Replace user ID `42` with the ID returned by the user-list endpoint. To
+downgrade an account, send `"role":"standard"` to the same role endpoint.
+
+### Removing an installed model
+
+From Settings → Models, an administrator can remove an installed model that is
+not currently a task default. The confirmation removes the model files from
+the shared OVMS model directory, its OVMS configuration references, and the
+ChatQnA catalog record. Change the task default first if the model is currently
+marked **Default**. In-progress, failed, non-OVMS, and otherwise uninstalled
+entries cannot be removed through this action. Existing conversations that
+referenced the removed model will no longer have that model selection.
+
+The UI performs this operation through the authenticated
+`DELETE /v1/chatqna/settings/models` endpoint:
+
+```bash
+curl -X DELETE -b admin.cookies \
+  -H 'Content-Type: application/json' \
+  -d '{"model_id":"MODEL_CATALOG_ID"}' \
+  http://localhost:8100/v1/chatqna/settings/models
+```
+
+This is a destructive operation on shared model files. Back up or redownload a
+model if it may be needed later.
    - **Execute the RAG AI pipeline**: The Chat Q&A backend microservice performs the following actions to generate the output response using the RAG pipeline.
       -   The query is converted into embedding space using the Embeddings microservice.
       - Semantic retrieval is done to fetch the relevant documents or data points from VectorDB. The reranker microservice ranks them in order of accuracy.
@@ -52,6 +133,12 @@ The Chat Q&A application is a combination of the core LangChain application logi
    - **Observability dashboard**: If set up, the dashboard displays real-time logs, metrics, and traces providing a view of the performance, accuracy, and resource consumption by the application.
 
 Conversation history is synchronized to the pgvector PostgreSQL database and restored after login. History is scoped to the account, not the browser. The Compose deployment stores PostgreSQL data in the `pgvector-data` named volume, which survives `docker compose down` and container recreation; `docker compose down -v` removes it. Chat messages are no longer persisted in browser localStorage.
+
+### Hugging Face token exchange
+
+Per-user Hugging Face tokens are stored encrypted in PostgreSQL and are never returned by the user-facing API. When an authenticated service requests a model download for a user, `model-download` authenticates to ChatQnA with `MODEL_DOWNLOAD_SERVICE_TOKEN`. ChatQnA encrypts the token with the separate `MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY`; only model-download decrypts it, in memory, for that request. The downloader rejects requests that specify a user credential without the service token.
+
+Configure both values as high-entropy secrets shared only by the ChatQnA and model-download containers. In Compose, set them in `.env`; in Kubernetes, create the same `service-token` and `encryption-key` Secret entries for both deployments and configure the corresponding secret names. The Fernet exchange key must be generated once and kept stable. It is separate from `HF_TOKEN_ENCRYPTION_KEY`, which protects tokens at rest. The model-download exchange URL should resolve to the ChatQnA service over the private container/cluster network; the encrypted response protects the HF token in transit. Existing non-user-scoped downloads and startup-model configuration retain their current environment-token behavior.
 
 Create an optional host-side database dump while the database is running:
 
@@ -84,13 +171,15 @@ The application flow is illustrated in the flow diagram below. The diagram shows
 
 4. **Chat Q&A UI**:
    - **What it is**: A reference front end providing an interface for users to interact with the Chat Q&A RAG pipeline.
-   - **How it’s used**: The UI microservice runs on the deployed HW on a certain configured port. Accessing the specific URL allows users to use the UI.
+   - **How it’s used**: The UI microservice runs on the deployed HW on a certain configured port. Accessing the specific URL allows users to use the UI. Signed-in users can open Settings from the username menu to change their password, save a Hugging Face token, and manage models. The Models tab lists models found in the shared OVMS model directory, lets users request downloads/conversions from Hugging Face, and set task-specific defaults for LLM, embedding, and reranker models. Download status and failure logs are available in the same tab.
    - **Benefits**: This microservice should be treated as a sample reference implementation.
 
 5. **pgvector database**
-   - **what it is**:
-   - **How it's used**:
-   - **Benefits**:
+   - **What it is**: PostgreSQL with the pgvector extension.
+   - **How it's used**: It stores document embeddings and application account data. The Chat Q&A backend also maintains a model catalog (`chat_models`), each user's conversation-to-LLM selection (`chat_user_conversations`), and a SHA-256 digest plus encrypted Hugging Face token per account.
+     Conversation history remains in its existing JSONB table for compatibility.
+   - **Benefits**: Model metadata and per-conversation choices are persistent database records, separate from model weight files. Hugging Face tokens are not returned by the API; the digest supports one-way storage while the encrypted copy is reserved for future authenticated model downloads. Configure a stable `HF_TOKEN_ENCRYPTION_KEY` outside the database (for example via a secrets manager) and back it up securely; without it, tokens cannot be saved or decrypted. For Helm, create the Kubernetes Secret named by `global.huggingface.tokenEncryptionKeySecretName` with an `encryption-key` entry.
+     The catalog stores model names, task, status, defaults, and artifact locations; model weights remain in the shared OVMS model directory. Per-conversation LLM selections are stored separately. Hugging Face tokens are not returned by the API; the digest supports one-way storage while the encrypted copy is used for authenticated model downloads. Configure a stable `HF_TOKEN_ENCRYPTION_KEY` outside the database (for example via a secrets manager) and back it up securely; without it, tokens cannot be saved or decrypted. For Helm, create the Kubernetes Secret named by `global.huggingface.tokenEncryptionKeySecretName` with an `encryption-key` entry. Model downloads also require the ChatQnA and model-download service credentials and token-exchange key to be configured; Compose users can set these in `.env`, while Helm users should configure the corresponding chart secrets.
 
 6. **Metrics Manager microservice**
    - **What it is**:

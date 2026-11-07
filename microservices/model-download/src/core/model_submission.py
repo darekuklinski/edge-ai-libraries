@@ -11,6 +11,10 @@ from typing import Any
 from src.api.models import ModelDownloadRequest, ModelHub
 from src.core.model_manager import ModelManager
 from src.core.plugin_registry import PluginRegistry
+from src.core.credential_exchange import (
+    CredentialExchangeError,
+    fetch_user_huggingface_token,
+)
 from src.utils.logging import logger
 
 
@@ -83,6 +87,7 @@ async def submit_models(
     model_manager: ModelManager,
     models_dir: str,
     background_tasks: set[asyncio.Task[Any]],
+    credential_user_id: int | None = None,
 ) -> list[str]:
     """Validate, register, and asynchronously schedule model jobs."""
 
@@ -109,6 +114,22 @@ async def submit_models(
 
         extra_kwargs = model.model_dump().copy()
         request_credentials = extra_kwargs.get("override_credentials") or {}
+        user_hf_token = None
+        effective_user_id = credential_user_id or request.credential_user_id
+        if effective_user_id is not None:
+            if hub_name != ModelHub.HUGGINGFACE.value:
+                raise ModelSubmissionError(
+                    "Per-user Hugging Face credentials are only supported for "
+                    "Hugging Face model requests."
+                )
+            try:
+                user_hf_token = await fetch_user_huggingface_token(
+                    effective_user_id
+                )
+            except CredentialExchangeError as error:
+                raise ModelSubmissionError(str(error)) from error
+            request_credentials["HF_TOKEN"] = user_hf_token
+            extra_kwargs["override_credentials"] = request_credentials
         plugin = plugin_registry.get_plugin("downloader", hub_name)
         if plugin is None:
             plugin = plugin_registry.find_plugin_for_model(
@@ -151,7 +172,7 @@ async def submit_models(
         model_download_path = _resolve_destination(models_dir, download_path)
 
         if model.hub.lower() in [hub.value.lower() for hub in ModelHub] and not needs_conversion:
-            extra_kwargs["token"] = hf_token
+            extra_kwargs["token"] = user_hf_token or hf_token
             extra_kwargs["parallel_downloads"] = request.parallel_downloads
             extra_kwargs.pop("hub", None)
             extra_kwargs.pop("is_ovms", None)
@@ -192,7 +213,7 @@ async def submit_models(
                     f"{openvino_error}"
                 )
 
-            extra_kwargs["token"] = hf_token
+            extra_kwargs["token"] = user_hf_token or hf_token
             config = model.config.model_dump() if model.config else {}
             config["device"] = config.get("device") or config.get("target_device") or "CPU"
             config["precision"] = (
@@ -237,7 +258,7 @@ async def submit_models(
                 model_manager.process_conversion(
                     job_id=convert_job_id,
                     model_path=model_download_path,
-                    hub=model.hub,
+                    hub=ModelHub.OPENVINO.value,
                     output_dir=convert_output_dir,
                     converter="openvino",
                     model_name=model.name,

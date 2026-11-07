@@ -33,10 +33,16 @@ export const HEALTH_CHECK_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/health';
 export const MODEL_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/model';
+export const MODELS_URL: string =
+  import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/models';
+export const SETTINGS_MODELS_URL: string =
+  import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/settings/models';
 export const CONVERSATION_HISTORY_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/conversations';
 export const AUTH_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/auth';
+export const ADMIN_USERS_URL: string =
+  import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/admin/users';
 export const MAX_TOKENS: number =
   Number(import.meta.env.VITE_MAX_TOKENS) || 512;
 

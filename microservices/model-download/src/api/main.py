@@ -3,6 +3,9 @@
 
 import os
 import io
+import hmac
+import json
+import re
 import zipfile
 import shutil
 import yaml
@@ -22,6 +25,7 @@ from ..core.model_submission import ModelSubmissionError, submit_models
 from ..core.startup_config import StartupModelsConfig, load_startup_models_config
 import importlib
 from .models import (
+    InstalledModelDeleteRequest,
     ModelDownloadRequest,
     ModelListItem,
     ModelListRequest,
@@ -144,6 +148,85 @@ MAX_UPLOAD_SIZE_BYTES = int(os.getenv("MAX_UPLOAD_SIZE_MB", "500")) * 1024 * 102
 UPLOAD_CHUNK_SIZE_BYTES = int(os.getenv("UPLOAD_CHUNK_SIZE_KB", "8")) * 1024
 CUSTOM_MODELS_SUBDIR = "custom_uploaded_models"
 
+
+def _require_service_auth(request: Request) -> None:
+    expected = os.getenv("MODEL_DOWNLOAD_SERVICE_TOKEN")
+    supplied = request.headers.get("authorization", "").removeprefix("Bearer ").strip()
+    if not expected or len(expected) < 32 or not expected.isascii():
+        raise HTTPException(
+            status_code=503, detail="Service authentication is not configured"
+        )
+    if not supplied or not supplied.isascii() or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=401, detail="Service authentication required")
+
+
+def _read_installed_ovms_models() -> list[dict[str, Any]]:
+    discovered: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+    for root, _, filenames in os.walk(models_dir):
+        if "config_all.json" not in filenames:
+            continue
+        config_path = os.path.join(root, "config_all.json")
+        try:
+            with open(config_path, encoding="utf-8") as config_file:
+                entries = json.load(config_file).get("model_config_list", [])
+        except (OSError, json.JSONDecodeError, AttributeError):
+            logger.warning("invalid_ovms_model_config", path=config_path)
+            continue
+        if not isinstance(entries, list):
+            continue
+
+        config_root = os.path.realpath(root)
+        for entry in entries:
+            config = entry.get("config") if isinstance(entry, dict) else None
+            if not isinstance(config, dict):
+                continue
+            name = config.get("name")
+            base_path = config.get("base_path")
+            if not isinstance(name, str) or not name or not isinstance(base_path, str):
+                continue
+            model_path = os.path.realpath(os.path.join(root, base_path))
+            if os.path.commonpath((config_root, model_path)) != config_root:
+                continue
+            graph_path = os.path.join(model_path, "graph.pbtxt")
+            if not os.path.isfile(graph_path):
+                continue
+            try:
+                with open(graph_path, encoding="utf-8") as graph_file:
+                    graph = graph_file.read(65536)
+            except OSError:
+                continue
+
+            if "Rerank" in graph or "RERANK" in graph:
+                task = "reranker"
+            elif "Embeddings" in graph or "EMBEDDINGS" in graph:
+                task = "embedding"
+            else:
+                task = "llm"
+
+            device_match = re.search(
+                r'(?:target_device|device):\s*"?([A-Za-z0-9:.,_-]+)', graph
+            )
+            device = device_match.group(1).upper() if device_match else "CPU"
+            precision_match = re.search(
+                r"(?:^|[/\\\\])(int4|int8|fp16|fp32)(?:[/\\\\]|$)",
+                os.path.relpath(model_path, models_dir),
+                re.IGNORECASE,
+            )
+            precision = precision_match.group(1).lower() if precision_match else ""
+            location = os.path.relpath(model_path, models_dir)
+            key = (name, task, device, precision)
+            discovered[key] = {
+                "model_name": name,
+                "display_name": name.rsplit("/", 1)[-1],
+                "task": task,
+                "device": device,
+                "precision": precision or None,
+                "artifact_location": location,
+                "source": "ovms",
+                "status": "ready",
+            }
+    return list(discovered.values())
+
 # Log which plugins are activated at startup. Plugins that serve multiple
 # user-facing hubs (e.g. external-sources) are logged per hub so operators
 # see the hub names they actually enable, not the internal plugin name.
@@ -196,6 +279,41 @@ async def health_check():
     Health check endpoint to verify the service is running.
     """
     return {"status": "ok"}
+
+
+@app.get("/models/available", tags=["Models"])
+async def list_installed_models(request: Request):
+    _require_service_auth(request)
+    return {"models": _read_installed_ovms_models()}
+
+
+@app.delete("/models/available", tags=["Models"])
+async def remove_installed_model(
+    payload: InstalledModelDeleteRequest, request: Request
+):
+    _require_service_auth(request)
+    if not any(
+        model["model_name"] == payload.model_name
+        and model["artifact_location"] == payload.artifact_location
+        for model in _read_installed_ovms_models()
+    ):
+        raise HTTPException(status_code=404, detail="Installed model not found")
+    try:
+        removed = await asyncio.to_thread(
+            model_manager.remove_installed_model,
+            payload.model_name,
+            payload.artifact_location,
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except OSError as error:
+        logger.exception("Failed to remove installed model", model_name=payload.model_name)
+        raise HTTPException(
+            status_code=500, detail="Model files could not be removed"
+        ) from error
+    if not removed:
+        raise HTTPException(status_code=404, detail="Installed model not found")
+    return {"status": "success"}
 
 
 async def _list_hub_models(
@@ -303,6 +421,7 @@ async def list_hub_models_with_body(request: ModelListRequest) -> ModelListRespo
 async def download_models(
     request: ModelDownloadRequest,
     download_path: str,
+    http_request: Request,
 ) -> Dict[str, Any]:
     """
     Download and optionally convert models.
@@ -317,6 +436,27 @@ async def download_models(
     Note: HF_TOKEN environment variable is optional and only required for downloading
     gated models from HuggingFace. Public models can be downloaded without authentication.
     """
+    if request.credential_user_id is not None:
+        service_token = os.getenv("MODEL_DOWNLOAD_SERVICE_TOKEN")
+        authorization = http_request.headers.get("authorization", "")
+        supplied_token = authorization.removeprefix("Bearer ").strip()
+        if (
+            not service_token
+            or len(service_token) < 32
+            or not service_token.isascii()
+        ):
+            raise HTTPException(
+                status_code=503, detail="Service authentication is not configured"
+            )
+        if (
+            not supplied_token
+            or not supplied_token.isascii()
+            or not hmac.compare_digest(supplied_token, service_token)
+        ):
+            raise HTTPException(
+                status_code=401, detail="Service authentication required"
+            )
+
     try:
         job_ids = await submit_models(
             request,
@@ -325,6 +465,7 @@ async def download_models(
             model_manager=model_manager,
             models_dir=models_dir,
             background_tasks=_background_tasks,
+            credential_user_id=request.credential_user_id,
         )
 
         # Return response immediately with job IDs
@@ -376,6 +517,27 @@ async def get_job_status(job_id: str):
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     return model_manager._jobs[job_id]
+
+
+@app.get("/jobs/{job_id}/logs", tags=["Jobs"])
+async def get_job_logs(job_id: str, request: Request):
+    _require_service_auth(request)
+    job = model_manager.get_job_status(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    log_parts = []
+    if job.get("error"):
+        log_parts.append(f"Error:\n{job['error']}")
+    result = job.get("result")
+    if isinstance(result, dict):
+        for key in ("stderr", "stdout", "error"):
+            value = result.get(key)
+            if isinstance(value, str) and value:
+                log_parts.append(f"{key.upper()}:\n{value}")
+    logs = "\n\n".join(log_parts) or "No detailed logs were captured for this job."
+    logs = re.sub(r"\bhf_[A-Za-z0-9_-]{20,}\b", "[REDACTED_HF_TOKEN]", logs)
+    return {"job_id": job_id, "logs": logs[-50000:]}
 
 
 @app.post("/jobs/{job_id}/cancel", tags=["Jobs"])

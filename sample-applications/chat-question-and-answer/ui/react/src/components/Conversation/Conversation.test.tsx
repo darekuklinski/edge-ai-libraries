@@ -32,12 +32,20 @@ vi.mock("../../utils/client", () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
   },
 }));
 
 const indexedFiles = [
   { file_name: "doc_Report_a1b2.pdf", bucket_name: "default" },
 ];
+
+class TestResizeObserver implements ResizeObserver {
+  constructor(_callback: ResizeObserverCallback) {}
+  observe(_target: Element, _options?: ResizeObserverOptions) {}
+  unobserve(_target: Element) {}
+  disconnect() {}
+}
 
 const mockAxiosResponse = (data: unknown) =>
   ({ data, status: 200 }) as Awaited<ReturnType<typeof client.get>>;
@@ -67,6 +75,7 @@ const sendQuestion = async (question: string) => {
 describe("conversation file attachments", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    globalThis.ResizeObserver = TestResizeObserver;
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn().mockImplementation((media: string) => ({
@@ -91,13 +100,34 @@ describe("conversation file attachments", () => {
       configurable: true,
       value: vi.fn(),
     });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
     vi.mocked(client.get).mockImplementation(async (url) =>
       mockAxiosResponse(
         url.includes("/documents")
           ? indexedFiles
+          : url.endsWith("/models")
+            ? {
+                models: [{
+                  id: "test-model",
+                  model_name: "test-model",
+                  display_name: "test-model",
+                  task: "llm",
+                  is_default: true,
+                }, {
+                  id: "other-model",
+                  model_name: "org/other-model",
+                  display_name: "other-model",
+                  task: "llm",
+                  is_default: false,
+                }],
+              }
           : { llm_model: "test-model" },
       ),
     );
+    vi.mocked(client.put).mockResolvedValue(mockAxiosResponse({}));
     vi.mocked(client.post).mockResolvedValue(
       mockAxiosResponse({
         status: 200,
@@ -141,5 +171,21 @@ describe("conversation file attachments", () => {
     const request = await sendQuestion("What is machine learning?");
 
     expect(request.attachments).toEqual([]);
+    expect(request.conversation_id).toBeTruthy();
+  });
+
+  test("persists a selected model for the active conversation", async () => {
+    renderConversation();
+    await sendQuestion("Use a different model");
+
+    fireEvent.click(await screen.findByRole("combobox", { name: "Language model" }));
+    fireEvent.click(await screen.findByRole("option", { name: "other-model" }));
+
+    await waitFor(() => {
+      expect(client.put).toHaveBeenCalledWith(
+        expect.stringMatching(/\/conversations\/[^/]+\/model$/),
+        { model_id: "other-model" },
+      );
+    });
   });
 });

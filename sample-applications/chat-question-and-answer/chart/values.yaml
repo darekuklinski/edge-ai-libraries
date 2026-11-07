@@ -2,6 +2,10 @@ global:
   huggingface:
     # Set this during installation
     apiToken:
+    # Create this Kubernetes Secret with an `encryption-key` entry.
+    tokenEncryptionKeySecretName: chatqna-hf-token-encryption
+  # Create this Kubernetes Secret with a `password` entry to bootstrap admin.
+  adminPasswordSecretName:
   proxy:
     no_proxy:
     http_proxy:
@@ -20,6 +24,8 @@ global:
   modelDownload:
     serviceName: # REQUIRED: e.g., model-download (use service name for same cluster)
     port: # REQUIRED: e.g., 8200 or 8000 (use service port, not NodePort)
+    serviceTokenSecretName: # Secret key `service-token`; share with model-download
+    tokenExchangeKeySecretName: # Secret key `encryption-key`; share with model-download
   #Set either one of the below embedding model sever to true by defauly OVMS is enabled
   teiEmbeddingService:
     enabled: false

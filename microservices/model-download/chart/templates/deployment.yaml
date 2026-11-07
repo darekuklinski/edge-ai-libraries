@@ -52,6 +52,22 @@ spec:
               value: "1"
             - name: HF_TOKEN
               value: "{{ .Values.modeldownload.env.HUGGINGFACEHUB_API_TOKEN }}"
+            - name: CHATQNA_TOKEN_EXCHANGE_URL
+              value: "{{ .Values.modeldownload.tokenExchange.chatqnaServiceUrl }}"
+            {{- if .Values.modeldownload.tokenExchange.serviceTokenSecretName }}
+            - name: MODEL_DOWNLOAD_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.modeldownload.tokenExchange.serviceTokenSecretName }}
+                  key: service-token
+            {{- end }}
+            {{- if .Values.modeldownload.tokenExchange.encryptionKeySecretName }}
+            - name: MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.modeldownload.tokenExchange.encryptionKeySecretName }}
+                  key: encryption-key
+            {{- end }}
             - name: MAX_UPLOAD_SIZE_MB
               value: "{{ .Values.modeldownload.env.MAX_UPLOAD_SIZE_MB }}"
             - name: UPLOAD_CHUNK_SIZE_KB

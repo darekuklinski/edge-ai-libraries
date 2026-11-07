@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import base64
+import json
 import os
 import pytest
 import tempfile
@@ -146,6 +147,204 @@ class TestAPIMain:
         }
         mock_submit.assert_awaited_once()
         assert mock_submit.await_args.args[1] == "api-models"
+
+    def test_per_user_download_requires_service_authentication(
+        self, mocker, client, monkeypatch
+    ):
+        submit = mocker.patch(
+            "src.api.main.submit_models", new_callable=AsyncMock
+        )
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", "s" * 48)
+
+        response = client.post(
+            "/models/download?download_path=api-models",
+            json={
+                "credential_user_id": 7,
+                "models": [{"name": "org/model", "hub": "huggingface"}],
+            },
+        )
+
+        assert response.status_code == 401
+        submit.assert_not_awaited()
+
+    def test_per_user_download_accepts_authenticated_chatqna_request(
+        self, mocker, client, monkeypatch
+    ):
+        submit = mocker.patch(
+            "src.api.main.submit_models",
+            new_callable=AsyncMock,
+            return_value=["user-job"],
+        )
+        service_token = "s" * 48
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", service_token)
+
+        response = client.post(
+            "/models/download?download_path=api-models",
+            headers={"Authorization": f"Bearer {service_token}"},
+            json={
+                "credential_user_id": 7,
+                "models": [{"name": "org/model", "hub": "huggingface"}],
+            },
+        )
+
+        assert response.status_code == 200
+        assert submit.await_args.kwargs["credential_user_id"] == 7
+
+    def test_available_models_scans_ovms_inventory(self, mocker, client, tmp_path):
+        mocker.patch("src.api.main.models_dir", str(tmp_path))
+        model_path = tmp_path / "int8" / "GPU" / "org" / "embed-model"
+        model_path.mkdir(parents=True)
+        (model_path / "graph.pbtxt").write_text(
+            'input: "input_ids"\nnode { name: "Embeddings" }\ntarget_device: "GPU"\n',
+            encoding="utf-8",
+        )
+        (tmp_path / "int8" / "GPU" / "config_all.json").write_text(
+            json.dumps(
+                {
+                    "model_config_list": [
+                        {
+                            "config": {
+                                "name": "org/embed-model",
+                                "base_path": "org/embed-model",
+                            }
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        (tmp_path / "config_all.json").write_text(
+            json.dumps(
+                {
+                    "model_config_list": [
+                        {
+                            "config": {
+                                "name": "org/embed-model",
+                                "base_path": "int8/GPU/org/embed-model",
+                            }
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        service_token = "s" * 48
+        mocker.patch.dict(os.environ, {"MODEL_DOWNLOAD_SERVICE_TOKEN": service_token})
+
+        response = client.get(
+            "/models/available",
+            headers={"Authorization": f"Bearer {service_token}"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["models"] == [
+            {
+                "model_name": "org/embed-model",
+                "display_name": "embed-model",
+                "task": "embedding",
+                "device": "GPU",
+                "precision": "int8",
+                "artifact_location": "int8/GPU/org/embed-model",
+                "source": "ovms",
+                "status": "ready",
+            }
+        ]
+
+    def test_available_models_requires_service_authentication(self, client, monkeypatch):
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", "s" * 48)
+
+        response = client.get("/models/available")
+
+        assert response.status_code == 401
+
+    def test_removing_installed_model_requires_service_authentication(
+        self, client, monkeypatch
+    ):
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", "s" * 48)
+
+        response = client.request(
+            "DELETE",
+            "/models/available",
+            json={
+                "model_name": "org/model",
+                "artifact_location": "int8/org/model",
+            },
+        )
+
+        assert response.status_code == 401
+
+    def test_removing_installed_model_deletes_only_discovered_artifact(
+        self, client, monkeypatch, mocker
+    ):
+        service_token = "s" * 48
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", service_token)
+        installed_model = {
+            "model_name": "org/model",
+            "artifact_location": "int8/org/model",
+        }
+        mocker.patch(
+            "src.api.main._read_installed_ovms_models",
+            return_value=[installed_model],
+        )
+        remove_model = mocker.patch.object(
+            model_manager, "remove_installed_model", return_value=True
+        )
+
+        response = client.request(
+            "DELETE",
+            "/models/available",
+            headers={"Authorization": f"Bearer {service_token}"},
+            json=installed_model,
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"status": "success"}
+        remove_model.assert_called_once_with("org/model", "int8/org/model")
+
+    def test_removing_unlisted_model_does_not_touch_disk(self, client, monkeypatch, mocker):
+        service_token = "s" * 48
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", service_token)
+        mocker.patch("src.api.main._read_installed_ovms_models", return_value=[])
+        remove_model = mocker.patch.object(model_manager, "remove_installed_model")
+
+        response = client.request(
+            "DELETE",
+            "/models/available",
+            headers={"Authorization": f"Bearer {service_token}"},
+            json={
+                "model_name": "org/model",
+                "artifact_location": "int8/org/model",
+            },
+        )
+
+        assert response.status_code == 404
+        remove_model.assert_not_called()
+
+    def test_job_logs_are_authenticated_and_redact_huggingface_tokens(
+        self, client, monkeypatch
+    ):
+        service_token = "s" * 48
+        monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", service_token)
+        monkeypatch.setitem(
+            model_manager._jobs,
+            "failed-job",
+            {
+                "error": "conversion failed with hf_123456789012345678901234",
+                "result": {"stderr": "bad graph"},
+            },
+        )
+
+        unauthorized = client.get("/jobs/failed-job/logs")
+        response = client.get(
+            "/jobs/failed-job/logs",
+            headers={"Authorization": f"Bearer {service_token}"},
+        )
+
+        assert unauthorized.status_code == 401
+        assert response.status_code == 200
+        assert "hf_123456789012345678901234" not in response.json()["logs"]
+        assert "[REDACTED_HF_TOKEN]" in response.json()["logs"]
+        assert "bad graph" in response.json()["logs"]
 
     @patch("src.api.main.plugin_registry")
     @patch("src.api.main.model_manager")

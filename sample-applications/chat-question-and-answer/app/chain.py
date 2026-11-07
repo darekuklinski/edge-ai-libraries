@@ -17,6 +17,7 @@ from langchain_openai import ChatOpenAI as EGAIModelServing
 from langchain_openai import OpenAIEmbeddings as EGAIEmbeddings
 from .custom_reranker import CustomReranker
 from .retrieval import retrieve_context
+from .account_store import get_default_model_settings
 import logging
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -169,11 +170,31 @@ async def context_retriever_fn(chain_inputs: dict):
         return {}  # to keep shape consistent
 
     attachments = chain_inputs.get("attachments", [])
+    model_settings = await get_default_model_settings("embedding")
+    selected_model = model_settings["model_name"] if model_settings else MODEL_NAME
+    active_vectorstore = knowledge_base
+    active_retriever = retriever
+    if selected_model != MODEL_NAME:
+        selected_embedder = EGAIEmbeddings(
+            openai_api_key="EMPTY",
+            openai_api_base=EMBEDDING_ENDPOINT_URL,
+            model=selected_model,
+        )
+        active_vectorstore = EGAIVectorDB(
+            embeddings=selected_embedder,
+            collection_name=COLLECTION_NAME,
+            connection=engine,
+        )
+        active_retriever = EGAIVectorStoreRetriever(
+            vectorstore=active_vectorstore,
+            search_type="mmr",
+            search_kwargs={"k": FETCH_K, "fetch_k": FETCH_K * 3},
+        )
     return await retrieve_context(
         question,
         attachments,
-        knowledge_base,
-        retriever,
+        active_vectorstore,
+        active_retriever,
         FETCH_K,
         FETCH_K * 3,
     )
@@ -202,7 +223,9 @@ def format_docs(docs):
     
     return "\n\n".join(formatted_docs)
 
-async def process_chunks(conversation_messages, max_tokens, attachments=None):
+async def process_chunks(
+    conversation_messages, max_tokens, attachments=None, model_name=None
+):
     """
     Process a list of conversation messages and stream the LLM-generated answer.
 
@@ -214,6 +237,7 @@ async def process_chunks(conversation_messages, max_tokens, attachments=None):
         The last message is treated as the user's question.
 
         max_tokens (int): Maximum number of tokens for the LLM response (if supported by backend).
+        model_name (str, optional): Per-conversation model served by the configured endpoint.
 
     Yields:
         str: Server-sent event strings ("data: ...\n\n") with the LLM's output chunks.
@@ -247,7 +271,7 @@ async def process_chunks(conversation_messages, max_tokens, attachments=None):
         model = EGAIModelServing(
             openai_api_key="EMPTY",
             openai_api_base="{}".format(ENDPOINT_URL),
-            model_name=LLM_MODEL,
+            model_name=model_name or LLM_MODEL,
             top_p=0.99,
             temperature=0.01,
             streaming=True,
@@ -259,7 +283,7 @@ async def process_chunks(conversation_messages, max_tokens, attachments=None):
         model = EGAIModelServing(
             openai_api_key="EMPTY",
             openai_api_base="{}".format(ENDPOINT_URL),
-            model_name=LLM_MODEL,
+            model_name=model_name or LLM_MODEL,
             top_p=0.99,
             temperature=0.01,
             streaming=True,
@@ -268,7 +292,21 @@ async def process_chunks(conversation_messages, max_tokens, attachments=None):
             max_tokens=max_tokens
         )
 
-    re_ranker = CustomReranker(reranking_endpoint=RERANKER_ENDPOINT)
+    reranker_settings = await get_default_model_settings("reranker")
+    reranker_model = reranker_settings["model_name"] if reranker_settings else None
+    use_ovms_reranker = bool(
+        reranker_settings and reranker_settings.get("backend") == "ovms"
+    )
+    reranker_endpoint = (
+        f"{ENDPOINT_URL.rstrip('/')}/rerank"
+        if use_ovms_reranker
+        else RERANKER_ENDPOINT
+    )
+    re_ranker = CustomReranker(
+        reranking_endpoint=reranker_endpoint,
+        model_name=reranker_model if use_ovms_reranker else None,
+        ovms=use_ovms_reranker,
+    )
     re_ranker_lambda = RunnableLambda(re_ranker.rerank)
 
     # RAG Chain

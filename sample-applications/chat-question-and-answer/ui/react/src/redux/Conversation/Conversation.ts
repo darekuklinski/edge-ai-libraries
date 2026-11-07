@@ -35,8 +35,17 @@ export interface FileUploadResponse {
 export interface Conversation {
   conversationId: string;
   title?: string;
+  modelId?: string;
   Messages: Message[];
   responseStatus?: boolean;
+}
+
+export interface ChatModel {
+  id: string;
+  model_name: string;
+  display_name: string;
+  task: string;
+  is_default: boolean;
 }
 
 export interface ConversationReducer {
@@ -44,6 +53,7 @@ export interface ConversationReducer {
   conversations: Conversation[];
   onGoingResults: { [conversationId: string]: string };
   modelName: string;
+  models: ChatModel[];
   files: File[];
   links: string[];
   isGenerating: { [conversationId: string]: boolean };

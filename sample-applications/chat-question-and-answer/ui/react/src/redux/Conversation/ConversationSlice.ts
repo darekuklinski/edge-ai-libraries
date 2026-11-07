@@ -10,6 +10,7 @@ import {
   ConversationReducer,
   ConversationRequest,
   Conversation,
+  ChatModel,
   File,
   FileUploadResponse,
 } from "./Conversation";
@@ -24,6 +25,7 @@ import {
   LINK_PREP_URL,
   MAX_TOKENS,
   MODEL_URL,
+  MODELS_URL,
 } from "../../config";
 
 type ConversationHistoryResponse = {
@@ -57,6 +59,7 @@ const initialState: ConversationReducer = {
   selectedConversationId: "",
   onGoingResults: {},
   modelName: "...",
+  models: [],
   files: [],
   links: [],
   isGenerating: {},
@@ -84,10 +87,16 @@ export const ConversationSlice = createSlice({
       state.selectedConversationId = "";
       //allow multiple conversations to generate simultaneously by not clearing ongoing and generating state
     },
-    createNewConversation: (state, action: PayloadAction<{ title: string; id: string; message: Message }>) => {
+    createNewConversation: (state, action: PayloadAction<{
+      title: string;
+      id: string;
+      message: Message;
+      modelId?: string;
+    }>) => {
       state.conversations.push({
         title: action.payload.title,
         conversationId: action.payload.id,
+        modelId: action.payload.modelId,
         Messages: [action.payload.message],
       });
     },
@@ -284,6 +293,24 @@ export const ConversationSlice = createSlice({
     builder.addCase(fetchModelName.rejected, (state) => {
       state.modelName = "Unknown Model";
     });
+    builder.addCase(fetchAvailableModels.fulfilled, (state, action) => {
+      state.models = action.payload;
+    });
+    builder.addCase(fetchAvailableModels.rejected, (_state, action) => {
+      notifications.show({
+        color: "red",
+        title: "Available models could not be loaded",
+        message: action.error.message ?? "The model catalog is unavailable.",
+      });
+    });
+    builder.addCase(setConversationModel.fulfilled, (state, action) => {
+      const conversation = state.conversations.find(
+        (item) => item.conversationId === action.payload.conversationId,
+      );
+      if (conversation) {
+        conversation.modelId = action.payload.modelId;
+      }
+    });
   },
 });
 
@@ -293,6 +320,31 @@ export const fetchModelName = createAsyncThunkWrapper(
     const response = await client.get(MODEL_URL);
     console.log("Fetched model name:", response);
     return response.data.llm_model || "Unknown Model";
+  },
+);
+
+export const fetchAvailableModels = createAsyncThunk(
+  "conversation/fetchAvailableModels",
+  async () => {
+    const response = await client.get<{ models: ChatModel[] }>(MODELS_URL);
+    return response.data.models;
+  },
+);
+
+export const setConversationModel = createAsyncThunk(
+  "conversation/setConversationModel",
+  async ({
+    conversationId,
+    modelId,
+  }: {
+    conversationId: string;
+    modelId: string;
+  }) => {
+    await client.put(
+      `${CONVERSATION_HISTORY_URL}/${encodeURIComponent(conversationId)}/model`,
+      { model_id: modelId },
+    );
+    return { conversationId, modelId };
   },
 );
 
@@ -522,6 +574,7 @@ export const conversationSelector = (state: RootState) => ({
   selectedConversationId: state.conversationReducer.selectedConversationId,
   onGoingResults: state.conversationReducer.onGoingResults,
   modelName: state.conversationReducer.modelName,
+  models: state.conversationReducer.models,
   files: state.conversationReducer.files,
   links: state.conversationReducer.links,
   isGenerating: state.conversationReducer.isGenerating,
@@ -541,6 +594,10 @@ export const doConversation = createAsyncThunk(
       // New conversation
       const id = uuidv4();
       activeConversationId = id;
+      const state = getState() as RootState;
+      const modelId = state.conversationReducer.models.find(
+        (model) => model.is_default,
+      )?.id;
 
       // First set the selected conversation ID
       dispatch(setSelectedConversationId(id));
@@ -551,12 +608,14 @@ export const doConversation = createAsyncThunk(
           title: userPrompt.content,
           id,
           message: userPrompt,
+          modelId,
         })
       );
 
       selectedConversation = {
         conversationId: id,
         Messages: [userPrompt],
+        modelId,
       };
     } else {
       activeConversationId = conversationId;
@@ -580,6 +639,7 @@ export const doConversation = createAsyncThunk(
       conversation_messages,
       max_tokens: MAX_TOKENS ?? 512,
       attachments: conversationRequest.attachments ?? [],
+      conversation_id: activeConversationId,
     };
 
     // Set generating state - user has submitted, waiting for AI to start responding

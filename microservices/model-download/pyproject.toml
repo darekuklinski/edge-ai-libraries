@@ -16,6 +16,8 @@ dependencies = [
     "PyYAML==6.0.2",
     "huggingface-hub[hf-xet]==2.2.0",
     "fastmcp>=3.0,<4.0",
+    "cryptography>=50.0.0",
+    "httpx>=0.24.1,<1.0.0",
 ]
 
 [project.optional-dependencies]

@@ -166,6 +166,13 @@ components:
           type: boolean
           default: false
           description: Whether to download model files in parallel where the plugin supports it
+        credential_user_id:
+          type: integer
+          minimum: 1
+          description: >
+            ChatQnA user whose Hugging Face credential is used for this download.
+            Requires the MODEL_DOWNLOAD_SERVICE_TOKEN bearer credential and a
+            configured encrypted credential exchange with ChatQnA.
 
     JobStatus:
       type: string
@@ -537,6 +544,42 @@ components:
           type: integer
           description: Number of items skipped for pagination
 
+    InstalledModel:
+      type: object
+      required:
+        - model_name
+        - display_name
+        - task
+        - artifact_location
+      properties:
+        model_name:
+          type: string
+        display_name:
+          type: string
+        task:
+          type: string
+          enum: [llm, embedding, reranker]
+        device:
+          type: string
+          nullable: true
+        precision:
+          type: string
+          nullable: true
+        artifact_location:
+          type: string
+        source:
+          type: string
+          example: ovms
+        status:
+          type: string
+          enum: [ready]
+
+  securitySchemes:
+    ServiceBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
+
 paths:
   /health:
     get:
@@ -552,6 +595,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+
+  /models/available:
+    get:
+      summary: List models installed for OVMS
+      description: |
+        Lists models found in the configured model directory by scanning OVMS
+        `config_all.json` files and model graph metadata. This endpoint is for
+        authenticated internal service-to-service use.
+      operationId: listInstalledModels
+      tags:
+        - Models
+      security:
+        - ServiceBearer: []
+      responses:
+        "200":
+          description: Installed models discovered in the model directory
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/InstalledModel"
+        "401":
+          description: Service authentication required
+        "503":
+          description: Service authentication is not configured
+    delete:
+      summary: Remove an installed OVMS model
+      description: |
+        Removes the exact discovered model artifact and its `config_all.json`
+        references from the configured model directory. This operation is
+        restricted to authenticated internal service-to-service use.
+      operationId: removeInstalledModel
+      tags:
+        - Models
+      security:
+        - ServiceBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model_name
+                - artifact_location
+              properties:
+                model_name:
+                  type: string
+                  minLength: 1
+                artifact_location:
+                  type: string
+                  minLength: 1
+                  description: Relative path returned by GET /models/available.
+      responses:
+        "200":
+          description: Installed model and its files were removed
+        "401":
+          description: Service authentication required
+        "404":
+          description: Installed model was not found
+        "409":
+          description: The model has an active download or conversion
+        "500":
+          description: Model files could not be removed
+        "503":
+          description: Service authentication is not configured
 
   /models/list:
     post:
@@ -922,6 +1035,43 @@ paths:
                   detail:
                     type: string
                     example: "Job download_abc123 is already in terminal state 'completed' and cannot be cancelled"
+
+  /jobs/{job_id}/logs:
+    get:
+      summary: Get model job failure logs
+      description: |
+        Returns bounded job error and process output, with Hugging Face tokens
+        redacted. This endpoint is for authenticated internal service-to-service use.
+      operationId: getJobLogs
+      tags:
+        - Jobs
+      security:
+        - ServiceBearer: []
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema:
+            type: string
+          description: The unique job identifier
+      responses:
+        "200":
+          description: Job logs retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id, logs]
+                properties:
+                  job_id:
+                    type: string
+                  logs:
+                    type: string
+                    maxLength: 50000
+        "401":
+          description: Service authentication required
+        "404":
+          description: Job not found
 
   /jobs:
     get:

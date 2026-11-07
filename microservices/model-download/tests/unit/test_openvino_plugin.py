@@ -904,6 +904,25 @@ class TestOpenVINOPullMode:
         )
 
     @patch('huggingface_hub.HfApi')
+    def test_search_preconverted_model_uses_anonymous_access_for_empty_token(
+        self, mock_hf_api_cls, openvino_plugin
+    ):
+        mock_api = MagicMock()
+        mock_hf_api_cls.return_value = mock_api
+        mock_model = MagicMock()
+        mock_model.id = "OpenVINO/TinyLlama-1.1B-Chat-v1.0-int4-ov"
+        mock_api.list_models.return_value = [mock_model]
+
+        result = openvino_plugin._search_preconverted_model(
+            model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            weight_format="int4",
+            hf_token="",
+        )
+
+        assert result == mock_model.id
+        mock_hf_api_cls.assert_called_once_with(token=None)
+
+    @patch('huggingface_hub.HfApi')
     def test_search_preconverted_model_not_found(self, mock_hf_api_cls, openvino_plugin):
         """Test _search_preconverted_model returns None when no match"""
         mock_api = MagicMock()
@@ -1036,6 +1055,29 @@ class TestOpenVINOPullMode:
             repo_id="OpenVINO/Llama-3.1-8B-int4-ov",
             token="test_token",
             local_dir=expected_model_dir,
+        )
+
+    @patch('huggingface_hub.snapshot_download')
+    @patch.object(OpenVINOConverter, '_search_preconverted_model')
+    def test_try_pull_preconverted_uses_anonymous_access_for_empty_token(
+        self, mock_search, mock_snapshot, openvino_plugin, temp_dir
+    ):
+        mock_search.return_value = "OpenVINO/TinyLlama-1.1B-Chat-v1.0-int4-ov"
+        mock_snapshot.return_value = temp_dir
+
+        openvino_plugin._try_pull_preconverted(
+            model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0",
+            weight_format="int4",
+            output_dir=temp_dir,
+            hf_token="",
+        )
+
+        mock_snapshot.assert_called_once_with(
+            repo_id="OpenVINO/TinyLlama-1.1B-Chat-v1.0-int4-ov",
+            token=None,
+            local_dir=os.path.join(
+                temp_dir, "TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+            ),
         )
 
     @patch.object(OpenVINOConverter, '_search_preconverted_model')

@@ -13,6 +13,7 @@ import {
   FileInput,
   Group,
   Loader,
+  Select,
   Stack,
   Text,
   Textarea,
@@ -24,6 +25,8 @@ import {
   doConversation,
   newConversation,
   fetchModelName,
+  fetchAvailableModels,
+  setConversationModel,
   fetchInitialFiles,
   uploadFile,
 } from '../../redux/Conversation/ConversationSlice'
@@ -52,6 +55,7 @@ const Conversation = ({ title }: ConversationProps) => {
   const [pendingAttachments, setPendingAttachments] = useState<DataSourceFile[]>([])
   const [fileListLoading, setFileListLoading] = useState(false)
   const [fileListError, setFileListError] = useState("")
+  const [modelSelectionPending, setModelSelectionPending] = useState(false)
   const promptInputRef = useRef<HTMLTextAreaElement>(null)
   const [fileUploadOpened, { close: closeFileUpload }] = useDisclosure(false);
 
@@ -60,6 +64,7 @@ const Conversation = ({ title }: ConversationProps) => {
     onGoingResults,
     selectedConversationId,
     modelName,
+    models,
     isGenerating,
     files,
     isUploading,
@@ -69,7 +74,11 @@ const Conversation = ({ title }: ConversationProps) => {
   const selectedConversation = conversations.find((x: any) => x.conversationId === selectedConversationId)
   const isAnyConversationWaitingForFirstToken = Object.values(isWaitingForFirstToken).some(Boolean)
 
-  const LLM_MODEL_URL = `https://huggingface.co/${modelName}`;
+  const selectedModel =
+    models.find((model) => model.id === selectedConversation?.modelId) ??
+    models.find((model) => model.is_default);
+  const displayedModelName = selectedModel?.display_name ?? modelName;
+  const LLM_MODEL_URL = `https://huggingface.co/${selectedModel?.model_name ?? modelName}`;
 
   const scrollViewport = useRef<HTMLDivElement>(null)
 
@@ -78,6 +87,7 @@ const Conversation = ({ title }: ConversationProps) => {
   // Fetch model name
   useEffect(() => {
     dispatch(fetchModelName(undefined));
+    dispatch(fetchAvailableModels());
   }, [dispatch]);
 
   // Check if we have any LLM responses to show model name
@@ -107,7 +117,7 @@ const Conversation = ({ title }: ConversationProps) => {
     left.file_name === right.file_name && left.bucket_name === right.bucket_name
 
   const handleSubmit = () => {
-    if (!prompt.trim() || isUploading) {
+    if (!prompt.trim() || isUploading || modelSelectionPending) {
       return
     }
 
@@ -156,6 +166,23 @@ const Conversation = ({ title }: ConversationProps) => {
 
   const handleNewConversation = () => {
     dispatch(newConversation())
+  }
+
+  const handleModelChange = (modelId: string | null) => {
+    if (!selectedConversationId || !modelId) {
+      return;
+    }
+    setModelSelectionPending(true);
+    void dispatch(setConversationModel({
+      conversationId: selectedConversationId,
+      modelId,
+    })).unwrap().catch((error: unknown) => {
+      notifications.show({
+        color: "red",
+        title: "Model selection could not be saved",
+        message: error instanceof Error ? error.message : "Please try again.",
+      });
+    }).finally(() => setModelSelectionPending(false));
   }
 
   const handleChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
@@ -258,13 +285,31 @@ const Conversation = ({ title }: ConversationProps) => {
             {hasLLMResponse && (
               <div style={{ textAlign: 'right', paddingTop: '12px' }}>
                 <Anchor href={LLM_MODEL_URL} target="_blank" size="xs" style={{ textDecoration: 'underline' }}>
-                  {modelName}
+                  {displayedModelName}
                 </Anchor>
               </div>
             )}
           </div>
 
           <div className={styleClasses.conversationActions}>
+            {selectedConversation && models.length > 0 && (
+              <Select
+                label="Language model"
+                aria-label="Language model"
+                value={selectedModel?.id ?? null}
+                data={models.map((model) => ({
+                  value: model.id,
+                  label: model.display_name,
+                }))}
+                onChange={handleModelChange}
+                disabled={
+                  modelSelectionPending ||
+                  Boolean(isGenerating[selectedConversationId])
+                }
+                maw={320}
+                mb="sm"
+              />
+            )}
             {pendingAttachments.length > 0 && (
               <Group gap="xs" mb="xs">
                 {pendingAttachments.map((file) => (
@@ -298,6 +343,7 @@ const Conversation = ({ title }: ConversationProps) => {
               onKeyDown={handleKeyDown}
               onChange={handleChange}
               value={prompt}
+              disabled={modelSelectionPending}
               autosize
               minRows={1}
               maxRows={4}
@@ -365,7 +411,7 @@ const Conversation = ({ title }: ConversationProps) => {
                 <ActionIcon
                   className={styleClasses.sendButton}
                   onClick={handleSubmit}
-                  disabled={!prompt.trim() || isUploading}
+                  disabled={!prompt.trim() || isUploading || modelSelectionPending}
                   aria-label="Send question"
                   size={28}
                   radius={7}

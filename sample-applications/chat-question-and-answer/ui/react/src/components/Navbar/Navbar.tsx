@@ -4,10 +4,11 @@ import { Button, Menu } from "@mantine/core";
 
 type NavbarProps = {
     username: string;
+    onSettings: () => void;
     onLogout: () => void;
 };
 
-export function Navbar({ username, onLogout }: NavbarProps) {
+export function Navbar({ username, onSettings, onLogout }: NavbarProps) {
     const systemInfo = [
         SYSTEM_INFO.cpu && `CPU: ${SYSTEM_INFO.cpu}`,
         SYSTEM_INFO.gpu && `GPU: ${SYSTEM_INFO.gpu}`,
@@ -34,6 +35,7 @@ export function Navbar({ username, onLogout }: NavbarProps) {
                         </Button>
                     </Menu.Target>
                     <Menu.Dropdown>
+                        <Menu.Item onClick={onSettings}>Settings</Menu.Item>
                         <Menu.Item color="red" onClick={onLogout}>Log out</Menu.Item>
                     </Menu.Dropdown>
                 </Menu>

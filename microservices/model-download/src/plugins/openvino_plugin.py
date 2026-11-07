@@ -257,7 +257,7 @@ class OpenVINOConverter(ModelDownloadPlugin):
         """
         try:
             from huggingface_hub import HfApi
-            api = HfApi(token=hf_token)
+            api = HfApi(token=hf_token or None)
             # Extract the short model name (part after the slash, or the full name)
             short_name = model_name.split("/")[-1] if "/" in model_name else model_name
 
@@ -355,7 +355,7 @@ class OpenVINOConverter(ModelDownloadPlugin):
 
             downloaded_path = snapshot_download(
                 repo_id=repo_id,
-                token=hf_token,
+                token=hf_token or None,
                 local_dir=model_dir,
             )
 

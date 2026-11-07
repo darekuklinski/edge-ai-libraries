@@ -23,15 +23,43 @@ spec:
             - containerPort: {{ .Values.Chatqna.service.port }}
           env:
             - name: NO_PROXY
-              value: "{{ .Values.global.proxy.no_proxy }},vllm-service.{{ .Release.Namespace }},text-generation-service.{{ .Release.Namespace }},ovms.{{ .Release.Namespace }},reranker.{{ .Release.Namespace }},tei-embedding-service.{{ .Release.Namespace }},ovms-embedding.{{ .Release.Namespace }}"
+              value: "{{ .Values.global.proxy.no_proxy }},vllm-service.{{ .Release.Namespace }},text-generation-service.{{ .Release.Namespace }},ovms.{{ .Release.Namespace }},reranker.{{ .Release.Namespace }},tei-embedding-service.{{ .Release.Namespace }},ovms-embedding.{{ .Release.Namespace }},{{ .Values.global.modelDownload.serviceName }}.{{ .Release.Namespace }}"
             - name: HTTP_PROXY
               value: {{ .Values.global.proxy.http_proxy }}
             - name: HTTPS_PROXY
               value: {{ .Values.global.proxy.https_proxy }}
-            - name: HF_TOKEN
-              value: {{ .Values.global.huggingface.apiToken }}
-            - name: HUGGINGFACEHUB_API_TOKEN
-              value: {{ .Values.global.huggingface.apiToken }}
+            - name: HF_TOKEN_ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.huggingface.tokenEncryptionKeySecretName }}
+                  key: encryption-key
+                  optional: true
+            {{- if .Values.global.modelDownload.serviceTokenSecretName }}
+            - name: MODEL_DOWNLOAD_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.modelDownload.serviceTokenSecretName }}
+                  key: service-token
+                  optional: true
+            {{- end }}
+            {{- if .Values.global.modelDownload.tokenExchangeKeySecretName }}
+            - name: MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.modelDownload.tokenExchangeKeySecretName }}
+                  key: encryption-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.global.adminPasswordSecretName }}
+            - name: CHATQNA_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.global.adminPasswordSecretName }}
+                  key: password
+                  optional: true
+            {{- end }}
+            - name: MODEL_DOWNLOAD_API_URL
+              value: "http://{{ .Values.global.modelDownload.serviceName }}.{{ .Release.Namespace }}:{{ .Values.global.modelDownload.port }}/api/v1"
             - name: LLM_MODEL
               value: {{ .Values.global.LLM_MODEL }}
             - name: EMBEDDING_MODEL

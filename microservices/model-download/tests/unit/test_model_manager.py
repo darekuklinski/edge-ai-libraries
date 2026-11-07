@@ -9,6 +9,68 @@ import pytest
 from src.core.model_manager import ModelManager
 
 
+def test_remove_installed_model_cleans_files_and_config_references(tmp_path):
+    models_root = tmp_path / "models"
+    artifact = models_root / "int8" / "org" / "model"
+    artifact.mkdir(parents=True)
+    (artifact / "graph.pbtxt").write_text("model graph", encoding="utf-8")
+    root_config = models_root / "config_all.json"
+    root_config.write_text(
+        json.dumps(
+            {
+                "model_config_list": [
+                    {
+                        "config": {
+                            "name": "org/model",
+                            "base_path": "int8/org/model",
+                        }
+                    },
+                    {
+                        "config": {
+                            "name": "org/other",
+                            "base_path": "other/model",
+                        }
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    precision_config = models_root / "int8" / "config_all.json"
+    precision_config.write_text(
+        json.dumps(
+            {
+                "model_config_list": [
+                    {
+                        "config": {
+                            "name": "org/model",
+                            "base_path": "org/model",
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager = ModelManager(MagicMock(), default_dir=str(models_root))
+    removed = manager.remove_installed_model("org/model", "int8/org/model")
+
+    assert removed is True
+    assert not artifact.exists()
+    assert json.loads(root_config.read_text(encoding="utf-8"))["model_config_list"] == [
+        {"config": {"name": "org/other", "base_path": "other/model"}}
+    ]
+    assert not precision_config.exists()
+
+
+def test_remove_installed_model_rejects_artifact_path_outside_models_root(tmp_path):
+    manager = ModelManager(MagicMock(), default_dir=str(tmp_path / "models"))
+
+    with pytest.raises(ValueError, match="escapes the models directory"):
+        manager.remove_installed_model("org/model", "../outside/model")
+
+
 @pytest.mark.asyncio
 async def test_process_download_refreshes_credentials_for_each_request(tmp_path):
     registry = MagicMock()
@@ -336,3 +398,58 @@ def test_cleanup_keeps_config_all_for_remaining_models(tmp_path):
     data = json.loads(config_path.read_text(encoding="utf-8"))
     names = [entry["config"]["name"] for entry in data.get("model_config_list", [])]
     assert names == ["microsoft/Phi-4-mini"]
+
+
+def test_register_ovms_model_adds_converted_model_to_root_config(tmp_path):
+    manager = ModelManager(MagicMock(), default_dir=str(tmp_path))
+    output_dir = tmp_path / "int8" / "GPU"
+    model_path = output_dir / "org" / "model"
+    model_path.mkdir(parents=True)
+    (output_dir / "config_all.json").write_text(
+        json.dumps(
+            {
+                "model_config_list": [
+                    {
+                        "config": {
+                            "name": "org/model",
+                            "base_path": "org/model",
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "config_all.json").write_text(
+        json.dumps(
+            {
+                "model_config_list": [
+                    {
+                        "config": {
+                            "name": "existing/model",
+                            "base_path": "existing/model",
+                        }
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manager._register_ovms_model(str(output_dir), "org/model")
+
+    config = json.loads((tmp_path / "config_all.json").read_text(encoding="utf-8"))
+    assert config["model_config_list"] == [
+        {
+            "config": {
+                "name": "existing/model",
+                "base_path": "existing/model",
+            }
+        },
+        {
+            "config": {
+                "name": "org/model",
+                "base_path": "int8/GPU/org/model",
+            }
+        },
+    ]

@@ -1,163 +1,178 @@
 # Get Started
 
-<!--
-**Sample Description**: Provide a brief overview of the application and its purpose.
--->
-
-The Chat Question & Answer (Chat Q&A) sample application is a modular Retrieval Augmented Generation (RAG) pipeline designed to help developers create intelligent chatbots that can answer questions based on enterprise data. This guide will help you set up, run, and modify the Chat Q&A sample application on Intel Edge AI systems.
-
-<!--
-**What You Can Do**: Highlight the developer workflows supported by the guide.
--->
-
-By following this guide, you will learn how to:
-
-- **Set up the sample application**: Use Docker Compose to quickly deploy the application in your environment.
-- **Run the application**: Execute the application to see real-time question answering based on your data.
-- **Modify application parameters**: Customize settings like inference models and deployment configurations to adapt the application to your specific requirements.
+The Chat Question & Answer (Chat Q&A) sample application is a modular
+Retrieval-Augmented Generation (RAG) pipeline designed to help developers create
+intelligent chatbots that answer questions based on enterprise data. This guide
+covers the supported first-time deployment and basic use of the application.
 
 ## Prerequisites
 
 - Verify that your system meets the [minimum requirements](./get-started/system-requirements.md).
-- Install Docker or equivalent (f.ex. podman)
-- Install Docker Compose or equivalent (f.ex podman compose)
-- Install `Python 3.12`.
-- `jq` command-line JSON processor: [Installation Guide](https://jqlang.org/download/).
+- Use a supported x86_64 Linux distribution. The deployment launcher supports
+  Debian 12+, Ubuntu 22.04+, Linux Mint 21.3+, Fedora 40+, RHEL/Rocky Linux 9+,
+  Arch Linux, and Manjaro, with Linux kernel 5.15 or newer.
+- A Hugging Face token is optional for the public default models. You need a
+  token with access to use gated or private models.
 
-<!--
-**Setup and First Use**: Include installation instructions, basic operation, and initial validation.
--->
+## Default CPU Models
 
-## Supported Models
+All embedding, reranker, and LLM models supported by the selected model serving
+can be used with this sample application. Models can be downloaded from model
+hubs such as Hugging Face. These public defaults are intended to allow a
+tokenless CPU deployment.
 
-All models - embedding, reranker, and LLM - which are supported by the chosen model serving can be used with this sample application. The models can be downloaded from popular model hubs like Hugging Face. Refer to respective model hub documentation for details on how to access and download models.
+| Task | Default Model |
+| --- | --- |
+| LLM | `TinyLlama/TinyLlama-1.1B-Chat-v1.0` |
+| Embedding | `BAAI/bge-base-en-v1.5` |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-2-v2` |
 
-The sample application has been validated with a few models just to validate the functionality. This list is only illustrative and the user is not limited to only these models.
+The TinyLlama OpenVINO artifact is about 640 MB; the BGE embedding artifact is
+about 112 MB. Other models can be configured in `.env`.
 
-### Embedding Models validated for each model server
+### Gated Models
 
-   | Model Server | Models Validated |
-   |--------------|------------------|
-   | `OVMS` | `Alibaba-NLP/gte-large-en-v1.5`, `nomic-ai/nomic-embed-text-v1.5` |
+The default CPU models are public and can be downloaded without a token. To run
+a gated or private model, provide a Hugging Face token and request access on
+the model's Hugging Face page. Create a token at
+[Hugging Face tokens](https://huggingface.co/settings/tokens).
 
-### LLM Models validated for each model server
-| Model Server | Models Validated |
-   |--------------|-------------------|
-   | `OVMS` | `Intel/neural-chat-7b-v3-3`, `Qwen/Qwen2.5-7B-Instruct`, `OpenAI/gpt-oss-20b` |
+## Deploying for the first time
 
-**Note:**
+Use the sample's deployment launcher as the supported way to deploy. Do not
+start the Compose stack directly; the launcher configures the selected device,
+downloads and prepares the models, starts the services, and waits for the
+application health check.
 
-1. Limited validation was done on gpt-oss model.
-
-### Reranker Models validated
-
-   | Model Server | Models Validated  |
-   |--------------|-------------------|
-   | `TEI` | `BAAI/bge-reranker-base` |
-
-### Getting access to models
-
-To run a **GATED MODEL** like llama models, the user will need to pass their [Hugging Face token](https://huggingface.co/docs/hub/security-tokens#user-access-tokens). The user will need to request access to specific model by going to the respective model page in HuggingFace.
-
-Visit the [Hugging Face tokens](https://huggingface.co/settings/tokens) page to get your token.
-
-## Running the application using Docker Compose
-
-<!--
-**User Story 1**: Setting Up the Application
-- **As a developer**, I want to set up the application in my environment, so that I can start exploring its functionality.
-
-**Acceptance Criteria**:
-1. Step-by-step instructions for downloading and installing the application.
-2. Verification steps to ensure successful setup.
-3. Troubleshooting tips for common installation issues.
--->
-
-1. **Clone the Repository**:
-   Clone the repository.
+1. Clone the repository (use your fork URL if applicable) and enter the sample:
 
    ```bash
-   # Clone the latest on mainline
-   git clone https://github.com/darekuklinski/edge-ai-libraries.git edge-ai-libraries
-
-   Note: Adjust the repo link appropriately in case of forked repo.
-
-
-2. **Navigate to the Directory**:
-   Go to the directory where the Docker Compose file is located:
-
-   ```bash
+   git clone https://github.com/open-edge-platform/edge-ai-libraries.git
    cd edge-ai-libraries/sample-applications/chat-question-and-answer
    ```
 
-3. **Set Up Environment Variables**:
-    Set up the environment variables based on the inference method you plan to use:
-
-    ```bash
-    cp .env.example .env
-    ```
-
-   > Adjust section in .env with required fields like hf_token, and if needed adjust device, if Your system does not have GPU
-
-    For detailed guidance on configuring __ALLOWED_HOSTS__ for different deployment scenarios, refer to [ALLOWED_HOSTS Configuration](https://docs.openedgeplatform.intel.com/dev/edge-ai-libraries/pgvector/get-started.html#allowed-hosts-configuration)
-
-    __NOTE__: If the system has an integrated GPU, its id is always 0 (GPU.0). The GPU is an alias for GPU.0. If a system has multiple GPUs (for example, an integrated and a discrete Intel GPU) It is done by specifying GPU.1,GPU.0 as a __DEVICE__
-
-    Refer to the supported model list in the [Get Started](./get-started.md) document.
-
-   Usage of scripts/run_chatQnA.sh is strongly recommended for users using other distro than fedora.
-   Setup script is interactive, so it will perform full setup. No need of applying .env changes manually
-
-   Power users can launch compose directly as well.
-   When launching Compose directly instead of using `setup.sh`, keep `DEVICE`, `COMPOSE_PROFILES`, and `STARTUP_MODELS_CONFIG_HOST_PATH` aligned in `.env`:
-
-   | Device | `COMPOSE_PROFILES` | `STARTUP_MODELS_CONFIG_HOST_PATH` |
-   | --- | --- | --- |
-   | CPU | `OVMS` | `./startup-models-cpu.yaml` |
-   | GPU | `GPU-OVMS` | `./startup-models-gpu.yaml` |
-
-   The GPU OVMS profile exposes `/dev/dri`. Selecting the CPU OVMS profile with GPU-configured models leaves OVMS without a GPU device and can make it terminate during model initialization.
-
-4. **Start the Application**:
-   Start the application using Podman Compose:
+2. Create your local configuration:
 
    ```bash
-   podman compose up # Replace with other solution in case of using Debina-based linux
+   cp .env.example .env
    ```
 
-   If you changed the `metrics-manager` Dockerfile, rebuild that service first; plain `docker compose up` may reuse an older image:
+   The default CPU models are public, so you can leave
+   `HUGGINGFACEHUB_API_TOKEN` blank. Set a token in `.env` or enter one when
+   prompted to use gated/private models. Set `DEVICE=CPU` or `DEVICE=GPU` in
+   `.env`; CPU is the default in the example. The launcher generates and saves
+   the local encryption and service-authentication keys needed by account
+   token settings when those values are blank.
+   GPU deployment requires a supported Intel GPU driver and `/dev/dri` render
+   device.
+
+3. Start the deployment:
 
    ```bash
-   podman compose build metrics-manager
-   podman compose up
+   ./easy-deploy.sh
    ```
 
-   - Refer to [the application architecture diagram](./how-it-works.md#technical-architecture-diagram) .
+   If `CHATQNA_ADMIN_PASSWORD` is not configured, the launcher securely prompts
+   for and confirms an initial admin password (8-128 characters). On first
+   setup, it provisions the `admin` account with that password. After the
+   deployment is healthy, the launcher displays the admin username and
+   password once for this new database. Store them securely. The password is
+   not displayed while typing. A later deployment does not reset or redisplay
+   an existing account's password; the launcher warns if it finds an existing
+   database volume that will be reused.
 
-6. **Verify the Application**:
-   Check that the application is running:
+The launcher installs missing host utilities and selects Docker Compose or
+Podman Compose. It starts the stack in detached mode and waits up to 30 minutes
+for the API and inference models to become healthy. Check service status and
+follow deployment logs with:
 
-   ```bash
-   podman ps
-   ```
+```bash
+podman compose ps
+podman compose logs -f
+```
 
-7. **Access the Application**:
-   Open a browser and go to `http://localhost:8101` to access the application dashboard. The application dashboard allows the user to,
-    - Create and manage context by adding documents (pdf, docx, etc.) and web links (only https).
-    > **Note**:
-    > - There are restrictions on the max size of the document allowed.
-    > - Only HTTPS URLs are allowed for web links.
-    - Start Q&A session with the created context.
+Use `docker compose` instead if Docker was selected. You can interact with a
+running service using `podman exec -it <container> <command>` (or
+`docker exec`); for example, `podman exec -it chatqna-ui sh`.
+For Podman, the launcher uses local image names for the backend and UI builds
+so Compose runs the images it just built rather than resolving them from a
+remote registry.
+
+When ready, open `http://localhost:8101` (or `http://<host-ip>:8101` from
+another device). Use the dashboard to add documents or HTTPS links to a context
+and start a Q&A session. The first model download can take a while.
+
+### Unattended deployment
+
+For CI or other non-interactive deployments, configure required inputs in
+`.env` or export them before running the launcher. Provide the target device
+and a unique initial admin password. A Hugging Face token is optional when
+using public models:
+
+```bash
+export DEVICE=CPU
+export CHATQNA_ADMIN_PASSWORD='your-unique-password'
+./easy-deploy.sh
+```
+
+Add `HUGGINGFACEHUB_API_TOKEN` to the environment or `.env` when using a
+gated/private model. Environment values take precedence over `.env`.
+Alternatively, set these values in the local `.env` file. Keep `.env` private
+and do not commit it. The launcher exits with an error instead of waiting for
+input when required values are missing in a non-interactive session.
+
+### Resetting a deployment
+
+Compose keeps named data volumes when containers are stopped or removed.
+`podman system prune -af` does not remove these named volumes, so running
+`./easy-deploy.sh` again reuses the PostgreSQL database and its existing
+accounts. The initial admin password is not a password-reset mechanism.
+
+To deliberately start with an empty database and object store, stop the stack
+and remove its project volumes with the same container engine used to deploy:
+
+```bash
+podman compose down --volumes
+```
+
+Use `docker compose down --volumes` if Docker was selected. This permanently
+deletes this deployment's stored accounts, conversations, and uploaded
+documents. Do this only when you intend to discard that data. Otherwise, sign
+in with the existing admin password and change it in the application settings.
+
+For a development reset that also removes this Compose project's service
+images and orphan containers, use the sample cleanup script:
+
+```bash
+./nuclear-cleanup.sh
+```
+
+It preserves `.env`, the model cache, and resources belonging to other
+projects. Add `--full-clean` to also remove the configured model cache under
+the sample directory, or `--dry-run` to inspect the cleanup actions first.
+The cleanup deletes this project's database and object-store data.
+
+### Verify the application
+
+The launcher reports the application URL once the API and configured inference
+models are healthy. You can also check the services with:
+
+```bash
+podman ps
+```
+
+If Docker was selected, use `docker ps` instead.
 
 ## Running in Kubernetes
 
-Refer to [Deploy with Helm](./get-started/deploy-with-helm.md) for the details. Ensure the prerequisites mentioned on this page are addressed before proceeding to deploy with Helm.
-> This section requires validation. No warranty on kubernetes with this fork
+Refer to [Deploy with Helm](./get-started/deploy-with-helm.md) for details.
+This section requires validation; Kubernetes deployment is not guaranteed for
+this fork.
 
 ## Running Tests
 
-1. Ensure you have the necessary environment variables set up as mentioned in the setup section.
-
+1. Ensure you have the environment variables set up as mentioned in the setup
+   section.
 2. Run the tests using `pytest`:
 
    ```sh
@@ -167,17 +182,11 @@ Refer to [Deploy with Helm](./get-started/deploy-with-helm.md) for the details. 
 
 ## Advanced Setup Options
 
-For alternative ways to set up the sample application, see:
-
-- [How to Build from Source](./get-started/build-from-source.md)
+For building the sample from source, see [How to Build from Source](./get-started/build-from-source.md).
 
 ## Related Links
 
 - [How to Test Performance](./how-to-performance.md)
-
-## Supporting Resources
-
-- [Docker Compose Documentation](https://docs.docker.com/compose/)
 
 <!--hide_directive
 :::{toctree}

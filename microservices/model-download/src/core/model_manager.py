@@ -22,6 +22,7 @@ from src.utils.logging import logger
 
 # Kwarg keys that may carry secrets (tokens, raw overrides) and must never be logged.
 _SENSITIVE_KWARG_KEYS = {"override_credentials", "resolved_config", "token", "hf_token"}
+_OVMS_CONFIG_LOCK = threading.RLock()
 
 
 def _redact_kwargs(kwargs: Dict[str, Any]) -> Dict[str, Any]:
@@ -198,17 +199,79 @@ class ModelManager:
         except OSError:
             return
 
+    def _register_ovms_model(self, output_dir: str, model_name: str) -> None:
+        converted_config_path = os.path.join(output_dir, "config_all.json")
+        if not os.path.isfile(converted_config_path):
+            return
+
+        with open(converted_config_path, encoding="utf-8") as config_file:
+            converted_config = json.load(config_file)
+        converted_entries = converted_config.get("model_config_list")
+        if not isinstance(converted_entries, list):
+            raise ValueError("Converted OVMS config has no model_config_list.")
+
+        entry = next(
+            (
+                item
+                for item in converted_entries
+                if isinstance(item, dict)
+                and item.get("config", {}).get("name") == model_name
+            ),
+            None,
+        )
+        if entry is None:
+            raise ValueError("Converted OVMS config does not include the requested model.")
+
+        source_base_path = entry.get("config", {}).get("base_path")
+        if not isinstance(source_base_path, str) or not source_base_path:
+            raise ValueError("Converted OVMS model has no valid base_path.")
+        model_path = os.path.realpath(os.path.join(output_dir, source_base_path))
+        models_root = os.path.realpath(self.default_dir)
+        if os.path.commonpath((models_root, model_path)) != models_root:
+            raise ValueError("Converted OVMS model path escapes the models directory.")
+
+        root_config_path = os.path.join(models_root, "config_all.json")
+        with _OVMS_CONFIG_LOCK:
+            if os.path.isfile(root_config_path):
+                with open(root_config_path, encoding="utf-8") as config_file:
+                    root_config = json.load(config_file)
+                root_entries = root_config.get("model_config_list")
+                if not isinstance(root_entries, list):
+                    raise ValueError("Root OVMS config has no model_config_list.")
+            else:
+                root_config = {"model_config_list": []}
+                root_entries = root_config["model_config_list"]
+
+            registered_entry = json.loads(json.dumps(entry))
+            registered_entry["config"]["base_path"] = os.path.relpath(
+                model_path, models_root
+            )
+            root_entries[:] = [
+                current
+                for current in root_entries
+                if current.get("config", {}).get("name") != model_name
+            ]
+            root_entries.append(registered_entry)
+
+            temporary_path = f"{root_config_path}.tmp"
+            with open(temporary_path, "w", encoding="utf-8") as config_file:
+                json.dump(root_config, config_file, indent=4)
+                config_file.write("\n")
+            os.replace(temporary_path, root_config_path)
+
     def _prune_empty_parents(self, path: str) -> None:
         """Prune empty parent dirs of ``path`` up to (but excluding) models root."""
         root = self.default_dir
         current = os.path.abspath(os.path.dirname(path))
 
+        ancestor = current
+        while ancestor != root and os.path.commonpath([root, ancestor]) == root:
+            self._cleanup_stale_config_all(ancestor)
+            ancestor = os.path.dirname(ancestor)
+
         while current != root and os.path.commonpath([root, current]) == root:
             if not os.path.isdir(current):
                 break
-
-            # Keep per-precision metadata consistent before checking emptiness.
-            self._cleanup_stale_config_all(current)
 
             try:
                 if os.listdir(current):
@@ -248,6 +311,85 @@ class ModelManager:
                     continue
 
             self._prune_empty_parents(candidate)
+
+    def remove_installed_model(
+        self, model_name: str, artifact_location: str
+    ) -> bool:
+        """Remove one installed OVMS artifact and its config references."""
+        root = os.path.realpath(self.default_dir)
+        candidate = os.path.realpath(os.path.join(root, artifact_location))
+        if candidate == root or os.path.commonpath([root, candidate]) != root:
+            raise ValueError("Model artifact path escapes the models directory.")
+
+        with self._jobs_lock, _OVMS_CONFIG_LOCK:
+            active_jobs = [
+                job
+                for job in self._jobs.values()
+                if job.get("model_name") == model_name
+                and job.get("status") in {"queued", "downloading", "converting"}
+            ]
+            if active_jobs:
+                raise ValueError("The model has an active download or conversion.")
+
+            references: list[tuple[str, dict[str, Any], list[dict[str, Any]]]] = []
+            for directory, _, filenames in os.walk(root):
+                if "config_all.json" not in filenames:
+                    continue
+                config_path = os.path.join(directory, "config_all.json")
+                try:
+                    with open(config_path, "r", encoding="utf-8") as file:
+                        config_data = json.load(file)
+                except (OSError, json.JSONDecodeError):
+                    continue
+                entries = config_data.get("model_config_list")
+                if not isinstance(entries, list):
+                    continue
+
+                config_root = os.path.realpath(directory)
+                kept_entries = []
+                removed = False
+                for entry in entries:
+                    config = entry.get("config") if isinstance(entry, dict) else None
+                    base_path = config.get("base_path") if isinstance(config, dict) else None
+                    name = config.get("name") if isinstance(config, dict) else None
+                    if not isinstance(base_path, str) or name != model_name:
+                        kept_entries.append(entry)
+                        continue
+                    configured_path = os.path.realpath(os.path.join(config_root, base_path))
+                    if (
+                        os.path.commonpath([config_root, configured_path]) == config_root
+                        and configured_path == candidate
+                    ):
+                        removed = True
+                    else:
+                        kept_entries.append(entry)
+                if removed:
+                    references.append((config_path, config_data, kept_entries))
+
+            for config_path, config_data, kept_entries in references:
+                if not kept_entries:
+                    os.remove(config_path)
+                    continue
+                config_data["model_config_list"] = kept_entries
+                temporary_path = f"{config_path}.{uuid.uuid4().hex}.tmp"
+                try:
+                    with open(temporary_path, "w", encoding="utf-8") as file:
+                        json.dump(config_data, file, indent=4)
+                        file.write("\n")
+                    os.replace(temporary_path, config_path)
+                finally:
+                    if os.path.exists(temporary_path):
+                        os.remove(temporary_path)
+
+            if os.path.isdir(candidate):
+                shutil.rmtree(candidate)
+            elif os.path.exists(candidate):
+                os.remove(candidate)
+            else:
+                return False
+
+            self._prune_empty_parents(candidate)
+            return True
 
     def _handle_cancelled_job(self, job_id: str, log_event: str, **log_extra) -> None:
         """Clean up residual files for a cancelled job and log the event."""
@@ -565,6 +707,7 @@ class ModelManager:
                 self._handle_cancelled_job(job_id, "conversion_cancelled_after_completion", model_name=model_name)
                 return {"job_id": job_id, "status": "canceled", "model_path": model_path}
 
+            self._register_ovms_model(output_dir, model_name)
             self._mark_job_completed(job_id, result)
 
             logger.info("conversion_completed", job_id=job_id, model_path=model_path)

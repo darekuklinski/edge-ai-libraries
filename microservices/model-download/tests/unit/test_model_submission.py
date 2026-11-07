@@ -67,6 +67,69 @@ async def test_submit_models_registers_and_schedules_download(registry, manager)
     assert not background_tasks
 
 
+async def test_user_scoped_download_uses_exchanged_token(registry, manager, mocker):
+    fetch_token = mocker.patch(
+        "src.core.model_submission.fetch_user_huggingface_token",
+        new_callable=AsyncMock,
+        return_value="hf_user-token",
+    )
+    request = ModelDownloadRequest.model_validate(
+        {
+            "credential_user_id": 42,
+            "models": [{"name": "org/private-model", "hub": "huggingface"}],
+        }
+    )
+    background_tasks = set()
+
+    await submit_models(
+        request,
+        "configured",
+        plugin_registry=registry,
+        model_manager=manager,
+        models_dir="/models",
+        background_tasks=background_tasks,
+    )
+    await asyncio.gather(*background_tasks)
+    await asyncio.sleep(0)
+
+    fetch_token.assert_awaited_once_with(42)
+    assert manager.process_download.call_args.kwargs["override_credentials"] == {
+        "HF_TOKEN": "hf_user-token"
+    }
+
+
+async def test_huggingface_model_conversion_uses_openvino_converter(registry, manager):
+    registry.get_plugin.return_value = MagicMock()
+    request = ModelDownloadRequest.model_validate(
+        {
+            "models": [
+                {
+                    "name": "org/model",
+                    "hub": "huggingface",
+                    "type": "llm",
+                    "is_ovms": True,
+                    "config": {"precision": "int4", "device": "CPU"},
+                }
+            ]
+        }
+    )
+    background_tasks = set()
+
+    await submit_models(
+        request,
+        "configured",
+        plugin_registry=registry,
+        model_manager=manager,
+        models_dir="/models",
+        background_tasks=background_tasks,
+    )
+    await asyncio.gather(*background_tasks)
+    await asyncio.sleep(0)
+
+    assert manager.process_conversion.call_args.kwargs["hub"] == "openvino"
+    assert manager.process_conversion.call_args.kwargs["model_name"] == "org/model"
+
+
 async def test_submit_models_rejects_unavailable_plugin(registry, manager):
     registry.hub_is_available.return_value = (False, "not activated")
     request = ModelDownloadRequest.model_validate(

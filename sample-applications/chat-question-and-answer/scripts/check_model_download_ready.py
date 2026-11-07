@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Healthcheck for completed ChatQnA OpenVINO model conversions."""
+"""Healthcheck for completed ChatQnA startup model jobs."""
 
 import json
 import os
@@ -22,13 +22,20 @@ def main() -> int:
         return 1
 
     for model_name in model_names:
-        conversions = [
+        model_jobs = [
             job
             for job in jobs
             if job.get("model_name") == model_name
-            and job.get("operation_type") == "convert"
+            and job.get("operation_type") in {"convert", "download"}
         ]
-        if not conversions or any(job.get("status") != "completed" for job in conversions):
+        if not model_jobs:
+            return 1
+
+        latest_job = max(
+            model_jobs,
+            key=lambda job: (job.get("start_time") or "", job.get("id") or ""),
+        )
+        if latest_job.get("status") != "completed":
             return 1
 
     model_slug = os.environ["LLM_MODEL"].split("/")[-1]
@@ -46,8 +53,6 @@ def main() -> int:
         content = template.read_text(encoding="utf-8")
         if original in content:
             template.write_text(content.replace(original, final_channel), encoding="utf-8")
-        elif final_channel not in content:
-            return 1
 
     return 0
 

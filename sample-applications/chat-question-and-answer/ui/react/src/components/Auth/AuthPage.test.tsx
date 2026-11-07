@@ -27,7 +27,7 @@ describe("AuthPage", () => {
   });
 
   it("allows creating an account and reports the signed-in account", async () => {
-    const account = { id: 12, username: "sample-user" };
+    const account = { id: 12, username: "sample-user", role: "standard" as const };
     const post = vi.spyOn(client, "post").mockResolvedValue({ data: account } as never);
     const onAuthenticated = vi.fn();
     render(
@@ -100,5 +100,34 @@ describe("AuthPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Log in" }));
 
     expect(await screen.findByText("Invalid username or password")).toBeTruthy();
+  });
+
+  it("allows a short existing password on login and hides password policy hints", async () => {
+    const post = vi.spyOn(client, "post").mockRejectedValue({
+      isAxiosError: true,
+      response: { status: 422, data: { detail: [{ msg: "String should have at least 8 characters" }] } },
+    });
+    render(
+      <MantineProvider>
+        <AuthPage onAuthenticated={vi.fn()} />
+      </MantineProvider>,
+    );
+
+    const passwordInput = screen.getByLabelText(/^Password/);
+    expect(passwordInput.getAttribute("minlength")).toBeNull();
+    fireEvent.change(screen.getByLabelText(/Username/), {
+      target: { value: "admin" },
+    });
+    fireEvent.change(passwordInput, { target: { value: "admin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Log in" }));
+
+    await waitFor(() => {
+      expect(post).toHaveBeenCalledWith(
+        expect.stringContaining("/auth/login"),
+        { username: "admin", password: "admin" },
+      );
+    });
+    expect(await screen.findByText("Invalid username or password.")).toBeTruthy();
+    expect(screen.queryByText(/8 characters|pattern|minimum/i)).toBeNull();
   });
 });

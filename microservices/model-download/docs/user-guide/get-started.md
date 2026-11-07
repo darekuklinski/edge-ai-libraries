@@ -518,6 +518,17 @@ whether the key is marked as sensitive. The `sensitive` flag only controls
 whether the value is redacted in service logs — Base64 encoding is required for
 every key. Use `GET /api/v1/plugins` to discover the keys each plugin accepts.
 
+For ChatQnA user-scoped downloads, send `credential_user_id` in the
+`ModelDownloadRequest` and authenticate the request with the shared
+`MODEL_DOWNLOAD_SERVICE_TOKEN` (at least 32 ASCII characters). The downloader
+retrieves that user's Hugging Face token from ChatQnA through the internal
+exchange URL and decrypts it using
+`MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY`; do not include the user's token in the
+download request. Configure both secrets on the ChatQnA and model-download
+services. The exchange key must be separate from the ChatQnA database encryption
+key. Non-user-scoped requests keep using the existing environment token and
+`override_credentials` behavior.
+
 **Encode credentials:**
 
 ```bash

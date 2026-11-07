@@ -1,18 +1,18 @@
 download_path: .
 parallel_downloads: true
 models:
-  - name: OpenVINO/gpt-oss-20b-int4-ov
-    hub: huggingface
+  - name: TinyLlama/TinyLlama-1.1B-Chat-v1.0
+    hub: openvino
     type: llm
-    is_ovms: false
+    is_ovms: true
     config:
-      precision: int8
+      precision: int4
       device: GPU
-      cache_size: 2
-  - name: nomic-ai/nomic-embed-text-v1.5
-    hub: huggingface
+      cache_size: 10
+  - name: BAAI/bge-base-en-v1.5
+    hub: openvino
     type: embeddings
-    is_ovms: false
+    is_ovms: true
     config:
       precision: int8
       device: GPU

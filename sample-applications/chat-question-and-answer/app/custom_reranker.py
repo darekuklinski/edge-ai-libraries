@@ -10,8 +10,15 @@ logging.basicConfig(level=logging.INFO)
 
 
 class CustomReranker:
-    def __init__(self, reranking_endpoint: str):
+    def __init__(
+        self,
+        reranking_endpoint: str,
+        model_name: str | None = None,
+        ovms: bool = False,
+    ):
         self._reranking_endpoint = reranking_endpoint
+        self._model_name = model_name
+        self._ovms = ovms
         logging.info(
             f"Initialized CustomReranker with reranking_endpoint: {self._reranking_endpoint}"
         )
@@ -40,11 +47,19 @@ class CustomReranker:
     def rerank_tei(self, retrieved_docs: Dict[str, Any]) -> Dict[str, Any]:
         texts = [d.page_content for d in retrieved_docs["context"]]
 
-        request_body = {
-            "query": retrieved_docs["question"],
-            "texts": texts,
-            "raw_scores": False,
-        }
+        request_body = (
+            {
+                "model": self._model_name,
+                "query": retrieved_docs["question"],
+                "documents": texts,
+            }
+            if self._ovms
+            else {
+                "query": retrieved_docs["question"],
+                "texts": texts,
+                "raw_scores": False,
+            }
+        )
 
         response = requests.post(
             url=f"{self.reranking_endpoint}",
@@ -53,6 +68,13 @@ class CustomReranker:
         )
         if response.status_code == 200:
             res = response.json()
+            if isinstance(res, dict):
+                res = res.get("results", [])
+            if not isinstance(res, list):
+                raise ValueError("Reranker returned an invalid response")
+            for item in res:
+                if "score" not in item and "relevance_score" in item:
+                    item["score"] = item["relevance_score"]
             # Sort by score descending, pick top 3 or all if less than 3
             sorted_results = sorted(res, key=lambda x: x["score"], reverse=True)
             top_k = min(3, len(sorted_results))

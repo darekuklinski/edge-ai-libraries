@@ -43,6 +43,188 @@ Returns:
           content: 
             application/json: 
               schema: 
+  /auth/register:
+    post:
+      summary: "Register a standard account"
+      description: "Creates a standard-group account and signs it in. Registration is unavailable until initial service setup has provisioned the bootstrap administrator. This endpoint never accepts a role."
+      operationId: "registerAccount"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAccountRequest"
+      responses:
+        "200":
+          description: "Standard account created and signed in"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "409":
+          description: "Username is already in use"
+        "422":
+          description: "Invalid username or password"
+        "503":
+          description: "Initial service setup is incomplete or account storage is unavailable"
+  /auth/login:
+    post:
+      summary: "Sign in"
+      description: "Authenticates an existing account and sets the HTTP-only chatqna_session cookie."
+      operationId: "loginAccount"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginAccountRequest"
+      responses:
+        "200":
+          description: "Signed-in account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          description: "Invalid username or password"
+        "503":
+          description: "Initial service setup is incomplete or account storage is unavailable"
+  /auth/me:
+    get:
+      summary: "Get the signed-in account"
+      description: "Returns account identity and group for the authenticated session."
+      operationId: "getCurrentUser"
+      security:
+        - ChatQnASession: []
+      responses:
+        "200":
+          description: "Signed-in account"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          description: "Authentication required or session expired"
+  /admin/users:
+    get:
+      summary: "List user accounts"
+      description: "Administrator-only. Returns account IDs, usernames, groups, and creation times."
+      operationId: "listUserAccounts"
+      security:
+        - ChatQnASession: []
+      responses:
+        "200":
+          description: "User accounts"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  users:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Account"
+        "401":
+          description: "Authentication required or session expired"
+        "403":
+          description: "Administrator access required"
+        "503":
+          description: "Account storage is unavailable"
+    post:
+      summary: "Create an administrator account"
+      description: "Administrator-only. Creates an account directly in the admin group."
+      operationId: "createAdministratorAccount"
+      security:
+        - ChatQnASession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAccountRequest"
+      responses:
+        "201":
+          description: "Administrator account created"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          description: "Authentication required or session expired"
+        "403":
+          description: "Administrator access required"
+        "409":
+          description: "Username is already in use"
+        "422":
+          description: "Invalid username or password"
+        "503":
+          description: "Account storage is unavailable"
+  /admin/users/{user_id}/role:
+    put:
+      summary: "Change an account group"
+      description: "Administrator-only. Promotes or downgrades an account. The last administrator cannot be downgraded, and an administrator cannot downgrade their own account."
+      operationId: "updateAccountRole"
+      security:
+        - ChatQnASession: []
+      parameters:
+        - name: "user_id"
+          in: "path"
+          required: true
+          schema:
+            type: "integer"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AccountRoleRequest"
+      responses:
+        "200":
+          description: "Account group updated"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "401":
+          description: "Authentication required or session expired"
+        "403":
+          description: "Administrator access required"
+        "404":
+          description: "Account not found"
+        "409":
+          description: "The change would remove the last administrator or the actor's own admin access"
+        "422":
+          description: "Invalid group"
+        "503":
+          description: "Account storage is unavailable"
+  /settings/models:
+    delete:
+      summary: "Remove an installed OVMS model"
+      description: "Administrator-only. Removes the exact installed model files, OVMS configuration references, and catalog record. Only ready, installed, non-default OVMS models can be removed."
+      operationId: "removeManagedModel"
+      security:
+        - ChatQnASession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteManagedModelRequest"
+      responses:
+        "200":
+          description: "Model removed"
+        "401":
+          description: "Authentication required or session expired"
+        "403":
+          description: "Administrator access required"
+        "404":
+          description: "Model not found"
+        "409":
+          description: "Model is default, not installed, or changed during removal"
+        "502":
+          description: "Model download service rejected the removal request"
+        "503":
+          description: "Model catalog or model download service is unavailable"
   /chat: 
     post: 
       summary: "Query Chain"
@@ -76,7 +258,12 @@ Raises:
             application/json: 
               schema: 
                 $ref: "#/components/schemas/HTTPValidationError"
-components: 
+components:
+  securitySchemes:
+    ChatQnASession:
+      type: "apiKey"
+      in: "cookie"
+      name: "chatqna_session"
   schemas: 
     HTTPValidationError: 
       properties: 
@@ -96,6 +283,71 @@ components:
       required: 
       - "input"
       title: "QuestionRequest"
+    RegisterAccountRequest:
+      type: "object"
+      required:
+        - "username"
+        - "password"
+      properties:
+        username:
+          type: "string"
+          minLength: 3
+          maxLength: 32
+          pattern: "^[A-Za-z0-9_.-]+$"
+        password:
+          type: "string"
+          minLength: 8
+          maxLength: 128
+    LoginAccountRequest:
+      type: "object"
+      required:
+        - "username"
+        - "password"
+      properties:
+        username:
+          type: "string"
+          maxLength: 32
+        password:
+          type: "string"
+          maxLength: 128
+    AccountRoleRequest:
+      type: "object"
+      required:
+        - "role"
+      properties:
+        role:
+          type: "string"
+          enum:
+            - "admin"
+            - "standard"
+    DeleteManagedModelRequest:
+      type: "object"
+      required:
+        - "model_id"
+      properties:
+        model_id:
+          type: "string"
+          minLength: 1
+          maxLength: 768
+    Account:
+      type: "object"
+      required:
+        - "id"
+        - "username"
+        - "role"
+      properties:
+        id:
+          type: "integer"
+        username:
+          type: "string"
+        role:
+          type: "string"
+          enum:
+            - "admin"
+            - "standard"
+        created_at:
+          type: "string"
+          format: "date-time"
     ValidationError: 
       properties: 
         loc: 

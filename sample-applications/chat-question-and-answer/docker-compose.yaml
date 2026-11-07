@@ -34,9 +34,13 @@ services:
       - FETCH_K=${FETCH_K}
       - EMBEDDING_MODEL=${EMBEDDING_MODEL_NAME}
       - PG_CONNECTION_STRING=${PG_CONNECTION_STRING}
-      - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
-      - HF_TOKEN=${HUGGINGFACEHUB_API_TOKEN}
+      - CHATQNA_ADMIN_PASSWORD=${CHATQNA_ADMIN_PASSWORD:-}
+      - MODEL_DOWNLOAD_API_URL=http://model-download:8000/api/v1
+      - HF_TOKEN_ENCRYPTION_KEY=${HF_TOKEN_ENCRYPTION_KEY:-}
+      - MODEL_DOWNLOAD_SERVICE_TOKEN=${MODEL_DOWNLOAD_SERVICE_TOKEN:-}
+      - MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY=${MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY:-}
       - LLM_MODEL=${LLM_MODEL}
+      - RERANKER_MODEL=${RERANKER_MODEL}
       - SEED=${SEED}
       - OTLP_ENDPOINT=${OTLP_ENDPOINT}
       - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_ENDPOINT:+${OTLP_ENDPOINT}/v1/traces}
@@ -165,6 +169,9 @@ services:
       context: ../../microservices/metrics-manager
       dockerfile: Dockerfile
     container_name: metrics-manager
+    # Supervisor and Telegraf need root inside the container; Podman's keep-id
+    # namespace otherwise starts this service as the host UID.
+    user: "0:0"
     privileged: ${PRIVILEGED:-true}
     apparmor: ${APPARMOR:-unconfined}
     userns_mode: ${CONTAINER_USERNS_MODE:-host}
@@ -213,17 +220,21 @@ services:
     userns_mode: ${CONTAINER_USERNS_MODE:-host}
     command: ["--plugins", "${MODEL_DOWNLOAD_PLUGINS:-all}"]
     environment:
-      - no_proxy=${no_proxy:-},model-download,host.containers.internal
+      - no_proxy=${no_proxy:-},model-download,chatqna,host.containers.internal
       - HF_HUB_ENABLE_HF_TRANSFER=1
       - HF_TOKEN=${HUGGINGFACEHUB_API_TOKEN:-}
       - HUGGINGFACEHUB_API_TOKEN=${HUGGINGFACEHUB_API_TOKEN:-}
+      - CHATQNA_TOKEN_EXCHANGE_URL=http://chatqna:8080
+      - MODEL_DOWNLOAD_SERVICE_TOKEN=${MODEL_DOWNLOAD_SERVICE_TOKEN:-}
+      - MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY=${MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY:-}
       - LLM_MODEL=${LLM_MODEL}
       - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}
       - STARTUP_MODELS_CONFIG=/opt/startup-models.yaml
       - ENABLED_PLUGINS=${MODEL_DOWNLOAD_PLUGINS:-all}
       - MODEL_PATH=/opt/models
       - MODEL_REPOSITORY_PATH=/opt/models
-      - OVMS_RELEASE_TAG=${OVMS_RELEASE_TAG:-v2025.4.1}
+      # The model downloader requires a v-prefixed release tag; the image tag below does not.
+      - OVMS_RELEASE_TAG=v${OVMS_RELEASE_TAG:-2026.4.1}
     ports:
       - "${MODEL_DOWNLOAD_HOST_PORT:-8200}:8000"
     volumes:
@@ -363,6 +374,9 @@ services:
       - "8300:8080"
     volumes:
       - "${MODEL_PATH:-./ovms/models}:/workspace/models:ro"
+    depends_on:
+      model-download:
+        condition: service_healthy
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/v2/health/ready" ]
       interval: 30s
@@ -412,6 +426,9 @@ services:
       - "8300:8080"
     volumes:
       - "${MODEL_PATH:-./ovms/models}:/workspace/models:ro"
+    depends_on:
+      model-download:
+        condition: service_healthy
     devices:
       - /dev/dri:/dev/dri
     group_add:

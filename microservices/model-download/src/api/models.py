@@ -405,6 +405,20 @@ class ModelRequest(BaseModel):
 class ModelDownloadRequest(BaseModel):
     models: List[ModelRequest]
     parallel_downloads: Optional[bool] = False
+    credential_user_id: Optional[int] = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Authenticated ChatQnA user whose Hugging Face token should be "
+            "retrieved through the encrypted internal credential exchange. "
+            "Requires the MODEL_DOWNLOAD_SERVICE_TOKEN bearer credential."
+        ),
+    )
+
+
+class InstalledModelDeleteRequest(BaseModel):
+    model_name: str = Field(min_length=1, max_length=512)
+    artifact_location: str = Field(min_length=1, max_length=2048)
 
 
 class ModelListRequest(BaseModel):

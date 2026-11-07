@@ -9,6 +9,10 @@ replicaCount: 1
 
 modeldownload:
   name: model-download
+  tokenExchange:
+    chatqnaServiceUrl: "http://chatqna-backend:8100"
+    serviceTokenSecretName: ""
+    encryptionKeySecretName: ""
   image:
     registry: "intel/"
     tag: latest

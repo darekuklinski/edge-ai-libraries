@@ -11,6 +11,7 @@ import classes from "./AuthPage.module.scss";
 export type Account = {
   id: number;
   username: string;
+  role: "admin" | "standard";
 };
 
 type AuthPageProps = {
@@ -44,11 +45,15 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
       if (axios.isAxiosError(requestError)) {
         const detail = requestError.response?.data?.detail;
         setError(
-          typeof detail === "string"
-            ? detail
-            : requestError.response?.status === 422
-              ? "Use a 3–32 character username (letters, numbers, dots, underscores, hyphens) and a password of at least 8 characters."
-              : "Could not connect to the account service. Please try again.",
+          !isRegistering &&
+            (requestError.response?.status === 401 ||
+              requestError.response?.status === 422)
+            ? "Invalid username or password."
+            : typeof detail === "string"
+              ? detail
+              : requestError.response?.status === 422
+                ? "Check your username and password and try again."
+                : "Could not connect to the account service. Please try again.",
         );
       } else {
         setError("Could not connect to the account service. Please try again.");
@@ -90,7 +95,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
             autoComplete={isRegistering ? "new-password" : "current-password"}
             value={password}
             onChange={(event) => setPassword(event.currentTarget.value)}
-            minLength={8}
+            minLength={isRegistering ? 8 : undefined}
             maxLength={128}
             required
           />
