@@ -1,10 +1,15 @@
 import { Provider } from "react-redux";
 import { configureStore } from "@reduxjs/toolkit";
 import { MantineProvider } from "@mantine/core";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import "@testing-library/jest-dom/vitest";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import Conversation from "./Conversation";
-import conversationReducer from "../../redux/Conversation/ConversationSlice";
+import conversationReducer, {
+  replaceConversations,
+  setSelectedConversationId,
+} from "../../redux/Conversation/ConversationSlice";
+import { MessageRole } from "../../redux/Conversation/Conversation";
 import client from "../../utils/client";
 
 const { fetchEventSourceMock } = vi.hoisted(() => ({
@@ -23,7 +28,9 @@ vi.mock("@microsoft/fetch-event-source", () => ({
   fetchEventSource: fetchEventSourceMock,
 }));
 vi.mock("./ConversationSideBar", () => ({
-  ConversationSideBar: () => null,
+  ConversationSideBar: ({ onNewConversation }: { onNewConversation: () => void }) => (
+    <button onClick={onNewConversation}>New chat</button>
+  ),
 }));
 vi.mock("../Drawer/DataSource", () => ({
   default: () => null,
@@ -54,13 +61,13 @@ const renderConversation = () => {
   const store = configureStore({
     reducer: { conversationReducer },
   });
-  return render(
+  return { store, ...render(
     <Provider store={store}>
       <MantineProvider>
         <Conversation title="Chat QnA" />
       </MantineProvider>
     </Provider>,
-  );
+  ) };
 };
 
 const sendQuestion = async (question: string) => {
@@ -174,18 +181,61 @@ describe("conversation file attachments", () => {
     expect(request.conversation_id).toBeTruthy();
   });
 
-  test("persists a selected model for the active conversation", async () => {
+  test("chooses a model before the first message and hides the selector afterward", async () => {
     renderConversation();
-    await sendQuestion("Use a different model");
-
     fireEvent.click(await screen.findByRole("combobox", { name: "Language model" }));
     fireEvent.click(await screen.findByRole("option", { name: "other-model" }));
+    expect(client.put).not.toHaveBeenCalled();
 
-    await waitFor(() => {
-      expect(client.put).toHaveBeenCalledWith(
-        expect.stringMatching(/\/conversations\/[^/]+\/model$/),
-        { model_id: "other-model" },
-      );
+    const request = await sendQuestion("Use a different model");
+    expect(client.put).toHaveBeenCalledWith(
+      expect.stringMatching(new RegExp(`/conversations/${request.conversation_id}/model$`)),
+      { model_id: "other-model" },
+    );
+    expect(vi.mocked(client.put).mock.invocationCallOrder[0])
+      .toBeLessThan(fetchEventSourceMock.mock.invocationCallOrder[0]);
+    expect(screen.queryByRole("combobox", { name: "Language model" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(screen.getByRole("combobox", { name: "Language model" })).toHaveValue("test-model");
+  });
+
+  test("hides the selector for restored conversations with messages, but shows it for empty ones", async () => {
+    const { store } = renderConversation();
+    await screen.findByRole("combobox", { name: "Language model" });
+    act(() => store.dispatch(replaceConversations([
+      { conversationId: "empty", modelId: "test-model", Messages: [] },
+      {
+        conversationId: "started",
+        modelId: "other-model",
+        Messages: [{ role: MessageRole.User, content: "Hello", time: 1 }],
+      },
+    ])));
+    expect(screen.queryByRole("combobox", { name: "Language model" })).toBeNull();
+    act(() => store.dispatch(setSelectedConversationId("empty")));
+    expect(screen.getByRole("combobox", { name: "Language model" })).toHaveValue("test-model");
+  });
+
+  test("hides the selector while the first response is still streaming", async () => {
+    fetchEventSourceMock.mockImplementationOnce(async () => new Promise<void>(() => {}));
+    renderConversation();
+    await screen.findByRole("combobox", { name: "Language model" });
+    await sendQuestion("Hello");
+    expect(screen.queryByRole("combobox", { name: "Language model" })).toBeNull();
+  });
+
+  test("keeps the first message and selection available if saving the model fails", async () => {
+    vi.mocked(client.put).mockRejectedValueOnce(new Error("Cannot save model"));
+    renderConversation();
+    await screen.findByRole("combobox", { name: "Language model" });
+    fireEvent.change(screen.getByPlaceholderText("Ask a question..."), {
+      target: { value: "Hello" },
     });
+    fireEvent.click(screen.getByRole("button", { name: "Send question" }));
+    await waitFor(() => expect(client.put).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Send question" })).toBeEnabled());
+    expect(fetchEventSourceMock).not.toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("Ask a question...")).toHaveValue("Hello");
+    expect(screen.getByRole("combobox", { name: "Language model" })).toBeEnabled();
   });
 });

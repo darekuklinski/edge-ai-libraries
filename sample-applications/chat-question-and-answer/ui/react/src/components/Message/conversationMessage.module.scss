@@ -31,12 +31,12 @@
 }
 
 .aiIcon {
-    background: #00a3f6;
+    background: var(--app-accent);
     color: #ffffff;
 }
 
 .userIcon {
-    background: #00a3f6;
+    background: var(--app-accent);
     color: #ffffff;
 }
 
@@ -63,22 +63,22 @@
 }
 
 .aiBubble {
-    background: #141f45;
-    color: #c8d4f0;
-    border: 1px solid #1b2652;
+    background: var(--app-raised);
+    color: var(--app-text);
+    border: 1px solid var(--app-border);
     border-radius: 4px 12px 12px 12px;
 }
 
 .userBubble {
-    background: #1e2a57;
-    color: #d8e0f0;
+    background: var(--app-user-bubble);
+    color: var(--app-text);
     border-radius: 12px 4px 12px 12px;
 }
 
 .messageDate {
     margin-top: 4px;
     font-size: 10px;
-    color: #556080;
+    color: var(--app-subtle);
 }
 
 .responseTime {
@@ -89,8 +89,8 @@
     width: fit-content;
     margin-top: 6px;
 
-    background: #141f45;
-    border: 1px solid #1b2652;
+    background: var(--app-raised);
+    border: 1px solid var(--app-border);
     border-radius: 20px;
 
     padding: 3px 10px;
@@ -105,13 +105,13 @@
 
 .responseValue {
     font-size: 10px;
-    color: #62ce58;
+    color: var(--app-text);
     font-weight: 500;
 }
 
 .responseLabel {
     font-size: 10px;
-    color: #556080;
+    color: var(--app-subtle);
 }
 .markdownContent {
     white-space: normal;
@@ -130,7 +130,7 @@
         margin: 0 0 8px;
         font-weight: 600;
         line-height: 1.55;
-        color: #f0f4ff;
+        color: var(--app-text);
     }
 
     h1 { font-size: 22px; }
@@ -168,10 +168,10 @@
         max-width: 100%;
         margin: 12px 0 4px;
         overflow-x: auto;
-        border: 1px solid #354571;
+        border: 1px solid var(--app-border);
         border-radius: 8px;
         scrollbar-width: thin;
-        scrollbar-color: #52658f #141f45;
+        scrollbar-color: var(--app-border) var(--app-raised);
     }
 
     table {
@@ -179,31 +179,31 @@
         min-width: 480px;
         border-collapse: separate;
         border-spacing: 0;
-        background: #101a3a;
+        background: var(--app-raised);
         text-align: left;
     }
 
     th,
     td {
         padding: 9px 12px;
-        border-right: 1px solid #354571;
-        border-bottom: 1px solid #354571;
+        border-right: 1px solid var(--app-border);
+        border-bottom: 1px solid var(--app-border);
         vertical-align: top;
         overflow-wrap: anywhere;
     }
 
     th {
-        background: #1e2b58;
-        color: #f0f4ff;
+        background: var(--app-active);
+        color: var(--app-text);
         font-weight: 600;
     }
 
     tbody tr:nth-child(even) {
-        background: #152144;
+        background: var(--app-table-stripe);
     }
 
     tbody tr:hover {
-        background: #1b2b54;
+        background: var(--app-table-hover);
     }
 
     tr > :last-child {
@@ -229,7 +229,7 @@
     }
 
     li::marker {
-        color: #8899cc;
+        color: var(--app-muted);
         font-size: 0.85em;
     }
 
@@ -246,9 +246,9 @@
         margin: 12px 0 0;
         padding: 9px 12px;
         border-left: 3px solid #00a3f6;
-        background: rgba(255, 255, 255, 0.035);
+        background: var(--app-table-stripe);
         border-radius: 6px;
-        color: #cfd8f6;
+        color: var(--app-text);
     }
 
     blockquote p {
@@ -256,12 +256,12 @@
     }
 
     strong {
-        color: #ffffff;
+        color: var(--app-text);
         font-weight: 700;
     }
 
     em {
-        color: #d7def0;
+        color: var(--app-text);
         font-style: italic;
     }
 }

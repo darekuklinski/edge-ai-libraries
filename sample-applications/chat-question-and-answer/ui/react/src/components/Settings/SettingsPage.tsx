@@ -21,6 +21,7 @@ import axios from "axios";
 import { ADMIN_USERS_URL, AUTH_URL, SETTINGS_MODELS_URL } from "../../config";
 import client from "../../utils/client";
 import classes from "./SettingsPage.module.scss";
+import { SystemPromptsTab } from "./SystemPromptsTab";
 
 type SettingsPageProps = {
   onBack: () => void;
@@ -583,12 +584,12 @@ function ModelManagementTab({ isAdmin }: { isAdmin: boolean }) {
         <Table.ScrollContainer minWidth={720}>
           <Table
             striped
-            stripedColor="#111a3b"
+            stripedColor="var(--app-table-stripe)"
             highlightOnHover
-            highlightOnHoverColor="#1c2b5b"
+            highlightOnHoverColor="var(--app-table-hover)"
             withTableBorder
             withColumnBorders
-            borderColor="#536487"
+            borderColor="var(--app-border)"
           >
             <Table.Thead>
               <Table.Tr>
@@ -824,6 +825,10 @@ export function SettingsPage({
     },
     ...(isAdmin
       ? [{
+          value: "system-prompts",
+          label: "System prompts",
+          panel: <SystemPromptsTab />,
+        }, {
           value: "admin",
           label: "Admin",
           panel: <AdminManagementTab currentUserId={currentUserId} />,

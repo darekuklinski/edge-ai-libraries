@@ -25,7 +25,7 @@ services:
     ports:
       - "8100:8080"
     environment:
-      - no_proxy=${no_proxy},metrics-manager,model-download,text-generation,tei-embedding-service,host.containers.internal
+      - no_proxy=${no_proxy},metrics-manager,model-download,text-generation,tei-embedding-service,ovms-service,chatqna,host.containers.internal
       - http_proxy=${http_proxy}
       - https_proxy=${https_proxy}
       - ENDPOINT_URL=${ENDPOINT_URL}
@@ -41,6 +41,7 @@ services:
       - MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY=${MODEL_DOWNLOAD_TOKEN_EXCHANGE_KEY:-}
       - LLM_MODEL=${LLM_MODEL}
       - RERANKER_MODEL=${RERANKER_MODEL}
+      - RERANKER_BACKEND=ovms
       - SEED=${SEED}
       - OTLP_ENDPOINT=${OTLP_ENDPOINT}
       - OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=${OTLP_ENDPOINT:+${OTLP_ENDPOINT}/v1/traces}
@@ -49,6 +50,12 @@ services:
       - OTEL_SERVICE_VERSION=${OTLP_ENDPOINT:+${OTEL_SERVICE_VERSION}}
       - REQUESTS_CA_BUNDLE=${REQUESTS_CA_BUNDLE:-}
       - RERANKER_ENDPOINT=${RERANKER_ENDPOINT}
+      - OVMS_MODEL_LIFECYCLE_ENABLED=true
+      - OVMS_MODEL_IDLE_SECONDS=${OVMS_MODEL_IDLE_SECONDS:-300}
+      - OVMS_CONFIG_SOURCE_PATH=/opt/models/config_all.json
+      - OVMS_ACTIVE_CONFIG_PATH=/runtime-config/config_active.json
+      - OVMS_MODEL_BASE_PATH=/workspace/models
+      - OVMS_REST_URL=http://ovms-service:8080
       - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-false}
       #- HOST_IP=${HOST_IP}
     networks:
@@ -57,6 +64,8 @@ services:
       pgvector:
         condition: service_healthy
     volumes:
+      - "${MODEL_PATH:-./ovms/models}:/opt/models:ro,z"
+      - ovms-runtime-config:/runtime-config
       - "${CA_CERTIFICATES_PATH:-/etc/ssl/certs}:/opt/share/ca-certificates"
       - "${SSL_CERTIFICATES_PATH:-/etc/ssl/certs}:/etc/ssl/certs"
   pgvector:
@@ -99,32 +108,22 @@ services:
     networks:
       - my_network
 
-  reranker:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.9.4
-    container_name: reranker_tei
-    ports:
-      - "8090:7777"
-    volumes:
-      - "${model_cache_path:-~/.cache/huggingface}:/root/.cache/huggingface"
-    environment:
-      - no_proxy=${no_proxy}
-      - http_proxy=${http_proxy}
-      - https_proxy=${https_proxy}
-      - MODEL_ID=${RERANKER_MODEL}
-    networks:
-      - my_network
-    command: --model-id ${RERANKER_MODEL} --auto-truncate
-
   dataprep_pgvector:
     image: ${REGISTRY:-}document-ingestion:latest
+    build:
+      context: ../../microservices/document-ingestion/pgvector
+      dockerfile: docker/Dockerfile
     container_name: dataprep_pgvector
     environment:
-      no_proxy: ${no_proxy},tei-embedding-service,minio-server
+      no_proxy: ${no_proxy},tei-embedding-service,minio-server,chatqna,ovms-service
       https_proxy: ${https_proxy}
       PG_CONNECTION_STRING: ${PG_CONNECTION_STRING}
       INDEX_NAME: ${INDEX_NAME}
       TEI_ENDPOINT_URL: ${EMBEDDING_ENDPOINT_URL}
       EMBEDDING_MODEL_NAME: ${EMBEDDING_MODEL_NAME}
+      OVMS_MODEL_LIFECYCLE_ENABLED: "true"
+      MODEL_LIFECYCLE_URL: http://chatqna:8080
+      MODEL_DOWNLOAD_SERVICE_TOKEN: ${MODEL_DOWNLOAD_SERVICE_TOKEN:-}
       CHUNK_SIZE: ${CHUNK_SIZE}
       CHUNK_OVERLAP: ${CHUNK_OVERLAP}
       BATCH_SIZE: ${BATCH_SIZE}
@@ -259,25 +258,29 @@ services:
     networks:
       - my_network
 
-  # ovms-config-init:
-  #   image: ovms-config-init:latest
-  #   profiles:
-  #     - OVMS
-  #     - GPU-OVMS
-  #   entrypoint: ["python"]
-  #   command: ["/opt/chatqna/generate_ovms_config.py"]
-  #   environment:
-  #     - LLM_MODEL=${LLM_MODEL}
-  #     - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}
-  #     - MODEL_REPOSITORY_PATH=/opt/models
-  #   volumes:
-  #     - "${MODEL_PATH:-./ovms/models}:/opt/models:z"
-  #     - ./scripts/generate_ovms_config.py:/opt/chatqna/generate_ovms_config.py:ro,Z
-  #   depends_on:
-  #     model-download:
-  #       condition: service_healthy
-  #   networks:
-  #     - my_network
+  ovms-config-init:
+    image: ${BE_IMAGE_NAME}
+    profiles:
+      - OVMS
+      - GPU-OVMS
+    user: "0:0"
+    entrypoint: ["python"]
+    command: ["/opt/chatqna/initialize_ovms_runtime_config.py"]
+    environment:
+      - LLM_MODEL=${LLM_MODEL}
+      - EMBEDDING_MODEL_NAME=${EMBEDDING_MODEL_NAME}
+      - RERANKER_MODEL=${RERANKER_MODEL}
+      - MODEL_REPOSITORY_PATH=/opt/models
+      - OVMS_RUNTIME_CONFIG_DIR=/runtime-config
+    volumes:
+      - "${MODEL_PATH:-./ovms/models}:/opt/models:ro,z"
+      - ovms-runtime-config:/runtime-config
+      - ./scripts/initialize_ovms_runtime_config.py:/opt/chatqna/initialize_ovms_runtime_config.py:ro,Z
+    depends_on:
+      model-download:
+        condition: service_healthy
+    networks:
+      - my_network
 
   #Model Server
   vllm-service:
@@ -373,8 +376,11 @@ services:
       - "9300:9300"
       - "8300:8080"
     volumes:
-      - "${MODEL_PATH:-./ovms/models}:/workspace/models:ro"
+      - "${MODEL_PATH:-./ovms/models}:/workspace/models:rw,z"
+      - ovms-runtime-config:/runtime-config:ro
     depends_on:
+      ovms-config-init:
+        condition: service_completed_successfully
       model-download:
         condition: service_healthy
     healthcheck:
@@ -382,7 +388,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    command: [ "--port", "9300", "--rest_port", "8080", "--log_level", "DEBUG", "--config_path", "/workspace/models/config_all.json" ]
+    command: [ "--port", "9300", "--rest_port", "8080", "--log_level", "DEBUG", "--config_path", "/runtime-config/config_active.json" ]
     networks:
       - my_network
 
@@ -425,8 +431,11 @@ services:
       - "9300:9300"
       - "8300:8080"
     volumes:
-      - "${MODEL_PATH:-./ovms/models}:/workspace/models:ro"
+      - "${MODEL_PATH:-./ovms/models}:/workspace/models:rw,z"
+      - ovms-runtime-config:/runtime-config:ro
     depends_on:
+      ovms-config-init:
+        condition: service_completed_successfully
       model-download:
         condition: service_healthy
     devices:
@@ -438,7 +447,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    command: [ "--port", "9300", "--rest_port", "8080", "--log_level", "DEBUG", "--config_path", "/workspace/models/config_all.json" ]
+    command: [ "--port", "9300", "--rest_port", "8080", "--log_level", "DEBUG", "--config_path", "/runtime-config/config_active.json" ]
     networks:
       - my_network
 
@@ -450,3 +459,4 @@ volumes:
   metrics-custom:
   object-store-data:
   pgvector-data:
+  ovms-runtime-config:

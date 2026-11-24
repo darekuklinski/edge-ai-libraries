@@ -12,7 +12,8 @@
   flex-direction: column;
   height: 100vh;
   min-height: 0;
-  background: #070d2d;
+  background: var(--app-shell);
+  color: var(--app-text);
   overflow: hidden;
 }
 
@@ -27,7 +28,7 @@
 /* Firefox */
 * {
   scrollbar-width: thin;
-  scrollbar-color: #d6d6d6 #ffffff;
+  scrollbar-color: var(--app-border) var(--app-shell);
 }
 
 /* Chrome, Edge, and Safari */
@@ -36,11 +37,11 @@
 }
 
 *::-webkit-scrollbar-track {
-  background: #ffffff;
+  background: var(--app-shell);
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: #d6d6d6;
+  background-color: var(--app-border);
   border-radius: 16px;
-  border: 4px double #dedede;
+  border: 2px solid var(--app-shell);
 }

@@ -27,7 +27,7 @@ The script preserves .env and does not run a system-wide container prune.
 EOF
 }
 
-sample_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+sample_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 full_clean=false
 dry_run=false
 

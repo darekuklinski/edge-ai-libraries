@@ -1,10 +1,8 @@
 .settingsPage {
-  color: #f5f7ff;
-  --mantine-color-text: #f5f7ff;
-  --mantine-color-dimmed: #b7c3db;
+  color: var(--app-text);
 
   :global([role="tab"][data-active="true"]) {
-    background-color: #1c2b5b;
-    color: #f5f7ff;
+    background-color: var(--app-active);
+    color: var(--app-text);
   }
 }

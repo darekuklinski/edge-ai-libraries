@@ -3,7 +3,8 @@
 
 import "./App.scss"
 import { useEffect, useRef, useState } from "react"
-import { Alert, Button, Center, Loader, MantineProvider, Stack } from "@mantine/core"
+import { Alert, Button, Center, Loader, MantineProvider, Stack, type CSSVariablesResolver } from "@mantine/core"
+import { useMediaQuery } from "@mantine/hooks";
 import '@mantine/notifications/styles.css';
 import Conversation from "./components/Conversation/Conversation"
 import { Notifications, notifications } from '@mantine/notifications';
@@ -22,8 +23,22 @@ import client from "./utils/client";
 import axios from "axios";
 
 const title = "ChatQnA"
+const cssVariablesResolver: CSSVariablesResolver = () => ({
+  variables: {},
+  light: {
+    "--mantine-color-placeholder": "var(--app-muted)",
+    "--mantine-color-dimmed": "var(--app-muted)",
+  },
+  dark: {
+    "--mantine-color-placeholder": "var(--app-muted)",
+    "--mantine-color-dimmed": "var(--app-muted)",
+  },
+});
 
 function App() {
+  const prefersDark = useMediaQuery("(prefers-color-scheme: dark)", undefined, {
+    getInitialValueInEffect: false,
+  });
   const dispatch = useAppDispatch();
   const conversations = useAppSelector(
     (state) => state.conversationReducer.conversations,
@@ -163,7 +178,11 @@ function App() {
   };
 
   return (
-    <MantineProvider>
+    <MantineProvider
+      forceColorScheme={prefersDark ? "dark" : "light"}
+      theme={{ primaryShade: { light: 8, dark: 8 } }}
+      cssVariablesResolver={cssVariablesResolver}
+    >
       <Notifications position="top-right" />
 
       {checkingSession ? (

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { MantineProvider } from "@mantine/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -101,5 +101,24 @@ describe("App inference status", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open settings" }));
     expect(screen.getByText("Settings page")).toBeTruthy();
+  });
+
+  it("follows changes to the system color scheme", () => {
+    let onChange: ((event: { matches: boolean }) => void) | undefined;
+    vi.stubGlobal("matchMedia", vi.fn().mockImplementation((media: string) => ({
+      matches: media === "(prefers-color-scheme: dark)",
+      media,
+      addEventListener: vi.fn((_type: string, listener: typeof onChange) => {
+        if (media === "(prefers-color-scheme: dark)") onChange = listener;
+      }),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    render(<App />);
+    expect(document.documentElement.getAttribute("data-mantine-color-scheme")).toBe("dark");
+    act(() => onChange?.({ matches: false }));
+    expect(document.documentElement.getAttribute("data-mantine-color-scheme")).toBe("light");
   });
 });

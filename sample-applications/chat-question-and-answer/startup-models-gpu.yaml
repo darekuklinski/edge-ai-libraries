@@ -17,3 +17,10 @@ models:
       precision: int8
       device: GPU
       extra_quantization_params: --library sentence_transformers
+  - name: cross-encoder/ms-marco-MiniLM-L-2-v2
+    hub: huggingface
+    type: rerank
+    is_ovms: true
+    config:
+      precision: int8
+      device: GPU
