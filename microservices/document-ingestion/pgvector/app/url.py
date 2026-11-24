@@ -18,6 +18,7 @@ from .logger import logger
 from .config import Settings
 from .db_config import pool_execution
 from .utils import get_separators, parse_html_content
+from .model_lifecycle import ModelLifecycleRequestError, model_lease
 import idna
 
 config = Settings()
@@ -231,28 +232,32 @@ def ingest_url_to_pgvector(url_list: List[str]) -> dict:
             metadata = [{"url": url}] * len(chunks)
             batch_size = config.BATCH_SIZE
 
-            for i in range(0, len(chunks), batch_size):
-                batch_texts = chunks[i : i + batch_size]
-                batch_metadata = metadata[i : i + batch_size]
+            with model_lease(config.EMBEDDING_MODEL_NAME):
+                for i in range(0, len(chunks), batch_size):
+                    batch_texts = chunks[i : i + batch_size]
+                    batch_metadata = metadata[i : i + batch_size]
 
-                PGVector.from_texts(
-                    texts=batch_texts,
-                    embedding=embedder,
-                    metadatas=batch_metadata,
-                    collection_name=config.INDEX_NAME,
-                    connection=config.PG_CONNECTION_STRING,
-                    use_jsonb=True,
-                )
+                    PGVector.from_texts(
+                        texts=batch_texts,
+                        embedding=embedder,
+                        metadatas=batch_metadata,
+                        collection_name=config.INDEX_NAME,
+                        connection=config.PG_CONNECTION_STRING,
+                        use_jsonb=True,
+                    )
 
-                logger.info(
-                    f"Processed batch {i // batch_size + 1}/"
-                    f"{(len(chunks) - 1) // batch_size + 1} for {url}"
-                )
+                    logger.info(
+                        f"Processed batch {i // batch_size + 1}/"
+                        f"{(len(chunks) - 1) // batch_size + 1} for {url}"
+                    )
 
         except requests.exceptions.SSLError as e:
             logger.error(f"SSL Error while fetching {url}: {e}")
             invalid_urls += 1
             continue
+
+        except ModelLifecycleRequestError:
+            raise
 
         except Exception as e:
             logger.exception(f"Error ingesting URL {url}")

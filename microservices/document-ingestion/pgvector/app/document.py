@@ -17,6 +17,7 @@ from docx.table import Table
 from .logger import logger
 from .config import Settings
 from .db_config import pool_execution
+from .model_lifecycle import model_lease
 
 config = Settings()
 
@@ -207,20 +208,21 @@ def ingest_to_pgvector(doc_path: Path, bucket: str):
 
         # Batch upload documents to handle large files
         batch_size = config.BATCH_SIZE
-        for i in range(0, len(documents), batch_size):
-            batch_documents = documents[i : i + batch_size]
+        with model_lease(config.EMBEDDING_MODEL_NAME):
+            for i in range(0, len(documents), batch_size):
+                batch_documents = documents[i : i + batch_size]
 
-            _ = PGVector.from_documents(
-                documents=batch_documents,
-                embedding=embedder,
-                collection_name=config.INDEX_NAME,
-                connection=config.PG_CONNECTION_STRING,
-                use_jsonb=True
-            )
+                _ = PGVector.from_documents(
+                    documents=batch_documents,
+                    embedding=embedder,
+                    collection_name=config.INDEX_NAME,
+                    connection=config.PG_CONNECTION_STRING,
+                    use_jsonb=True
+                )
 
-            logger.info(
-                f"Processed batch {i // batch_size + 1}/{(len(documents) - 1) // batch_size + 1}"
-            )
+                logger.info(
+                    f"Processed batch {i // batch_size + 1}/{(len(documents) - 1) // batch_size + 1}"
+                )
 
     except HTTPException as e:
         raise e
