@@ -58,6 +58,15 @@ from .account_store import (
     sync_installed_models,
     update_managed_model,
 )
+from .model_lifecycle import ModelLifecycleError, model_lifecycle
+from .system_prompts import (
+    delete_prompt_assignment,
+    delete_system_prompt,
+    list_system_prompts,
+    save_system_prompt,
+    set_default_system_prompt,
+    set_prompt_assignment,
+)
 
 app = FastAPI(title="Chat Question and Answer", root_path="/v1/chatqna")
 
@@ -145,6 +154,22 @@ class ConversationModelRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=512)
 
 
+class SystemPromptRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=128)
+    content: str = Field(min_length=1, max_length=20000)
+
+
+class SystemPromptAssignmentRequest(BaseModel):
+    scope: Literal["model", "family"]
+    target: str = Field(min_length=1, max_length=512)
+    prompt_id: str = Field(min_length=1, max_length=128)
+
+
+class DeleteSystemPromptAssignmentRequest(BaseModel):
+    scope: Literal["model", "family"]
+    target: str = Field(min_length=1, max_length=512)
+
+
 class ManagedModelRequest(BaseModel):
     model_name: str = Field(
         min_length=3,
@@ -174,6 +199,11 @@ class AccountRoleRequest(BaseModel):
 
 class DeleteManagedModelRequest(BaseModel):
     model_id: str = Field(min_length=1, max_length=768)
+
+
+class ModelLeaseRequest(BaseModel):
+    model_name: str = Field(min_length=1, max_length=512)
+    lease_id: str = Field(min_length=1, max_length=128)
 
 
 class InstalledModel(BaseModel):
@@ -579,6 +609,49 @@ async def exchange_huggingface_token(user_id: int, request: Request):
     return {"encrypted_token": encrypted_token}
 
 
+def _require_model_lifecycle_service(request: Request) -> None:
+    service_token = os.getenv("MODEL_DOWNLOAD_SERVICE_TOKEN", "")
+    authorization = request.headers.get("authorization", "")
+    supplied_token = authorization.removeprefix("Bearer ").strip()
+    if not model_lifecycle.enabled:
+        raise HTTPException(
+            status_code=503, detail="OVMS model lifecycle is not enabled"
+        )
+    if len(service_token) < 32 or not service_token.isascii():
+        raise HTTPException(
+            status_code=503, detail="Service authentication is not configured"
+        )
+    if (
+        not supplied_token
+        or not supplied_token.isascii()
+        or not hmac.compare_digest(supplied_token, service_token)
+    ):
+        raise HTTPException(status_code=401, detail="Service authentication required")
+
+
+@app.post("/internal/model-runtime/leases", status_code=204)
+async def acquire_model_runtime_lease(
+    payload: ModelLeaseRequest, request: Request
+):
+    _require_model_lifecycle_service(request)
+    try:
+        await model_lifecycle.acquire(payload.model_name, payload.lease_id)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error)) from error
+    except ModelLifecycleError as error:
+        logging.exception("Could not load OVMS model for runtime lease")
+        raise HTTPException(status_code=503, detail=str(error)) from error
+
+
+@app.delete("/internal/model-runtime/leases/{lease_id}", status_code=204)
+async def release_model_runtime_lease(lease_id: str, request: Request):
+    _require_model_lifecycle_service(request)
+    try:
+        await model_lifecycle.release(lease_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
 @app.post("/auth/logout")
 async def logout_account(request: Request, response: Response):
     session_token = request.cookies.get(SESSION_COOKIE_NAME)
@@ -651,6 +724,99 @@ async def list_managed_models(_user: dict[str, Any] = Depends(require_user)):
         raise HTTPException(
             status_code=502, detail="Model download service returned invalid catalog data"
         ) from error
+
+
+@app.get("/settings/system-prompts")
+async def get_system_prompt_settings(_admin: dict[str, Any] = Depends(require_admin)):
+    try:
+        prompts, assignments = await list_system_prompts()
+        return {"prompts": prompts, "assignments": assignments}
+    except SQLAlchemyError as error:
+        logging.exception("Failed to load system prompts")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.post("/settings/system-prompts", status_code=201)
+async def create_system_prompt(
+    payload: SystemPromptRequest, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        return {"id": await save_system_prompt(payload.name, payload.content)}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to create system prompt")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.put("/settings/system-prompts/assignments")
+async def put_system_prompt_assignment(
+    payload: SystemPromptAssignmentRequest, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        await set_prompt_assignment(payload.scope, payload.target, payload.prompt_id)
+        return {"status": "success"}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to save system prompt assignment")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.delete("/settings/system-prompts/assignments")
+async def remove_system_prompt_assignment(
+    payload: DeleteSystemPromptAssignmentRequest, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        await delete_prompt_assignment(payload.scope, payload.target)
+        return {"status": "success"}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to delete system prompt assignment")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.put("/settings/system-prompts/{prompt_id}")
+async def update_system_prompt(
+    prompt_id: str, payload: SystemPromptRequest, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        await save_system_prompt(payload.name, payload.content, prompt_id)
+        return {"status": "success"}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to update system prompt")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.put("/settings/system-prompts/{prompt_id}/default")
+async def make_system_prompt_default(
+    prompt_id: str, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        await set_default_system_prompt(prompt_id)
+        return {"status": "success"}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to update default system prompt")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
+
+
+@app.delete("/settings/system-prompts/{prompt_id}")
+async def remove_system_prompt(
+    prompt_id: str, _admin: dict[str, Any] = Depends(require_admin)
+):
+    try:
+        await delete_system_prompt(prompt_id)
+        return {"status": "success"}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to delete system prompt")
+        raise HTTPException(status_code=503, detail="System prompt storage is unavailable") from error
 
 
 @app.post("/settings/models", status_code=202)
@@ -774,6 +940,23 @@ async def delete_managed_model(
                 status_code=409,
                 detail="The model changed while it was being removed. Refresh and retry.",
             )
+        if model_lifecycle.enabled:
+            try:
+                deactivated = await model_lifecycle.deactivate_model(
+                    model["model_name"]
+                )
+            except ModelLifecycleError as error:
+                await cancel_managed_model_removal(payload.model_id)
+                logging.exception("Could not unload OVMS model before removal")
+                raise HTTPException(
+                    status_code=503, detail="Model server could not unload the model"
+                ) from error
+            if not deactivated:
+                await cancel_managed_model_removal(payload.model_id)
+                raise HTTPException(
+                    status_code=409,
+                    detail="The model is in use and cannot be removed right now.",
+                )
         try:
             await _call_model_download(
                 "DELETE",

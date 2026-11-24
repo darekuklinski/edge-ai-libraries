@@ -72,6 +72,7 @@ application health check.
    ./easy-deploy.sh
    ```
 
+   Choose `deploy` from the menu, or run `./easy-deploy.sh deploy` directly.
    If `CHATQNA_ADMIN_PASSWORD` is not configured, the launcher securely prompts
    for and confirms an initial admin password (8-128 characters). On first
    setup, it provisions the `admin` account with that password. After the
@@ -99,8 +100,10 @@ so Compose runs the images it just built rather than resolving them from a
 remote registry.
 
 When ready, open `http://localhost:8101` (or `http://<host-ip>:8101` from
-another device). Use the dashboard to add documents or HTTPS links to a context
-and start a Q&A session. The first model download can take a while.
+another device). Choose the language model before sending the first message in
+a new conversation; the selector disappears once the conversation starts. Use
+the dashboard to add documents or HTTPS links to a context and start a Q&A
+session. The first model download can take a while.
 
 ### Unattended deployment
 
@@ -112,7 +115,7 @@ using public models:
 ```bash
 export DEVICE=CPU
 export CHATQNA_ADMIN_PASSWORD='your-unique-password'
-./easy-deploy.sh
+./easy-deploy.sh deploy
 ```
 
 Add `HUGGINGFACEHUB_API_TOKEN` to the environment or `.env` when using a
@@ -125,7 +128,7 @@ input when required values are missing in a non-interactive session.
 
 Compose keeps named data volumes when containers are stopped or removed.
 `podman system prune -af` does not remove these named volumes, so running
-`./easy-deploy.sh` again reuses the PostgreSQL database and its existing
+`./easy-deploy.sh deploy` again reuses the PostgreSQL database and its existing
 accounts. The initial admin password is not a password-reset mechanism.
 
 To deliberately start with an empty database and object store, stop the stack
@@ -144,7 +147,7 @@ For a development reset that also removes this Compose project's service
 images and orphan containers, use the sample cleanup script:
 
 ```bash
-./nuclear-cleanup.sh
+./easy-deploy.sh cleanup
 ```
 
 It preserves `.env`, the model cache, and resources belonging to other

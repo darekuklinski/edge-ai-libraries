@@ -187,6 +187,10 @@ async def _ensure_tables() -> None:
                 )
             )
 
+            from .system_prompts import initialize_system_prompts
+
+            await initialize_system_prompts(connection)
+
             configured_models = (
                 (
                     os.getenv("LLM_MODEL"),
@@ -200,7 +204,12 @@ async def _ensure_tables() -> None:
                     _backend_for_endpoint(os.getenv("EMBEDDING_ENDPOINT_URL")),
                     False,
                 ),
-                (os.getenv("RERANKER_MODEL"), "reranker", "tei", False),
+                (
+                    os.getenv("RERANKER_MODEL"),
+                    "reranker",
+                    os.getenv("RERANKER_BACKEND", "tei"),
+                    False,
+                ),
             )
             for configured_model, task, backend, is_default in configured_models:
                 if not configured_model:
@@ -223,6 +232,20 @@ async def _ensure_tables() -> None:
                         "task": task,
                         "backend": backend,
                         "is_default": is_default,
+                    },
+                )
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE chat_models
+                        SET backend = :backend
+                        WHERE model_name = :model_name AND task = :task
+                        """
+                    ),
+                    {
+                        "model_name": configured_model,
+                        "task": task,
+                        "backend": backend,
                     },
                 )
 

@@ -5,8 +5,8 @@
     width: 100%;
     overflow: hidden;
 
-    background: #070d2d;
-    border-top: 1px solid #1b2652;
+    background: var(--app-shell);
+    border-top: 1px solid var(--app-border);
     padding: 6px 14px;
 }
 
@@ -34,7 +34,7 @@
 
 .chartsTitle {
     font-size: 10px;
-    color: #556080;
+    color: var(--app-subtle);
     letter-spacing: 0.8px;
     text-transform: uppercase;
 }
@@ -53,8 +53,8 @@
     min-width: 0;
     min-height: 0;
     overflow: hidden;
-    background: #0f1b43;
-    border: 1px solid #1b2652;
+    background: var(--app-surface);
+    border: 1px solid var(--app-border);
     border-radius: 8px;
     padding: 5px 8px;
     display: flex;
@@ -76,7 +76,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 10px;
-    color: #8899cc;
+    color: var(--app-muted);
     font-weight: 500;
     letter-spacing: 0.5px;
     text-transform: uppercase;
@@ -85,6 +85,7 @@
 .chartCardValue {
     font-size: 16px;
     font-weight: 500;
+    color: var(--app-text);
 }
 
 .chartWrap {
@@ -110,8 +111,8 @@
     justify-content: space-between;
     align-items: flex-end;
     padding: 2px 0;
-    border-left: 1px solid #1b2652;
-    color: #6a85a8;
+    border-left: 1px solid var(--app-border);
+    color: var(--app-subtle);
     font-size: 9px;
     line-height: 1;
 }
@@ -143,7 +144,7 @@
     justify-content: center;
     gap: 7px;
     padding-left: 6px;
-    border-left: 1px solid #1b2652;
+    border-left: 1px solid var(--app-border);
 }
 
 .gpuLegendItem {
@@ -151,7 +152,7 @@
     align-items: center;
     gap: 4px;
     font-size: 9px;
-    color: #6a85a8;
+    color: var(--app-subtle);
     text-transform: lowercase;
 }
 

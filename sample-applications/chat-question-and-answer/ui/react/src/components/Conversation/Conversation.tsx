@@ -33,7 +33,7 @@ import {
 import { ConversationMessage } from '../Message/conversationMessage'
 import { useAppDispatch, useAppSelector } from '../../redux/store'
 import { File as DataSourceFile, Message, MessageRole } from '../../redux/Conversation/Conversation'
-import { extractOriginalFilename, getCurrentTimeStamp } from '../../utils/util'
+import { extractOriginalFilename, getCurrentTimeStamp, uuidv4 } from '../../utils/util'
 import { useDisclosure } from '@mantine/hooks'
 import DataSource from '../Drawer/DataSource'
 import { ConversationSideBar } from './ConversationSideBar'
@@ -56,6 +56,7 @@ const Conversation = ({ title }: ConversationProps) => {
   const [fileListLoading, setFileListLoading] = useState(false)
   const [fileListError, setFileListError] = useState("")
   const [modelSelectionPending, setModelSelectionPending] = useState(false)
+  const [draftModelId, setDraftModelId] = useState<string | null>(null)
   const promptInputRef = useRef<HTMLTextAreaElement>(null)
   const [fileUploadOpened, { close: closeFileUpload }] = useDisclosure(false);
 
@@ -75,7 +76,7 @@ const Conversation = ({ title }: ConversationProps) => {
   const isAnyConversationWaitingForFirstToken = Object.values(isWaitingForFirstToken).some(Boolean)
 
   const selectedModel =
-    models.find((model) => model.id === selectedConversation?.modelId) ??
+    models.find((model) => model.id === (selectedConversation ? selectedConversation.modelId : draftModelId)) ??
     models.find((model) => model.is_default);
   const displayedModelName = selectedModel?.display_name ?? modelName;
   const LLM_MODEL_URL = `https://huggingface.co/${selectedModel?.model_name ?? modelName}`;
@@ -116,9 +117,29 @@ const Conversation = ({ title }: ConversationProps) => {
   const sameFile = (left: DataSourceFile, right: DataSourceFile) =>
     left.file_name === right.file_name && left.bucket_name === right.bucket_name
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!prompt.trim() || isUploading || modelSelectionPending) {
       return
+    }
+
+    const newConversationId = selectedConversationId ? undefined : uuidv4()
+    if (newConversationId && selectedModel) {
+      setModelSelectionPending(true)
+      try {
+        await dispatch(setConversationModel({
+          conversationId: newConversationId,
+          modelId: selectedModel.id,
+        })).unwrap()
+      } catch (error: unknown) {
+        notifications.show({
+          color: "red",
+          title: "Model selection could not be saved",
+          message: error instanceof Error ? error.message : "Please try again.",
+        })
+        setModelSelectionPending(false)
+        return
+      }
+      setModelSelectionPending(false)
     }
 
     const userPrompt: Message = {
@@ -130,6 +151,8 @@ const Conversation = ({ title }: ConversationProps) => {
     const submittedAttachments = [...pendingAttachments]
     const submission = dispatch(doConversation({
       conversationId: selectedConversationId,
+      newConversationId,
+      modelId: newConversationId ? selectedModel?.id : undefined,
       userPrompt,
       attachments: submittedAttachments,
     }))
@@ -165,11 +188,16 @@ const Conversation = ({ title }: ConversationProps) => {
 
 
   const handleNewConversation = () => {
+    setDraftModelId(null)
     dispatch(newConversation())
   }
 
   const handleModelChange = (modelId: string | null) => {
-    if (!selectedConversationId || !modelId) {
+    if (!modelId || selectedConversation?.Messages.length) {
+      return;
+    }
+    if (!selectedConversationId) {
+      setDraftModelId(modelId);
       return;
     }
     setModelSelectionPending(true);
@@ -292,7 +320,7 @@ const Conversation = ({ title }: ConversationProps) => {
           </div>
 
           <div className={styleClasses.conversationActions}>
-            {selectedConversation && models.length > 0 && (
+            {(!selectedConversation || selectedConversation.Messages.length === 0) && models.length > 0 && (
               <Select
                 label="Language model"
                 aria-label="Language model"
@@ -410,7 +438,7 @@ const Conversation = ({ title }: ConversationProps) => {
               rightSection={
                 <ActionIcon
                   className={styleClasses.sendButton}
-                  onClick={handleSubmit}
+                  onClick={() => void handleSubmit()}
                   disabled={!prompt.trim() || isUploading || modelSelectionPending}
                   aria-label="Send question"
                   size={28}

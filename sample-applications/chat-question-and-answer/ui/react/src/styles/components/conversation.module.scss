@@ -11,7 +11,7 @@
     display: flex;
     flex: 1;
     min-height: 0;
-    background: #0f1b43;
+    background: var(--app-surface);
 }
 
 .conversationContent {
@@ -26,7 +26,7 @@
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: #0f1b43;
+    background: var(--app-surface);
 }
 
 .conversationToolbar {
@@ -35,8 +35,8 @@
     justify-content: flex-end;
     min-height: 44px;
     padding: 8px 14px;
-    border-bottom: 1px solid #1b2652;
-    background: #0f1b43;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-surface);
 }
 
 .historyContainer {
@@ -52,8 +52,8 @@
 
 .conversationActions {
     padding: 10px 14px;
-    background: #0f1b43;
-    border-top: 1px solid #1b2652;
+    background: var(--app-surface);
+    border-top: 1px solid var(--app-border);
     flex-shrink: 0;
 }
 
@@ -63,16 +63,16 @@
 
 .promptInput {
     min-height: 44px !important;
-    background-color: #141f45 !important;
-    border: 1px solid #1b2652 !important;
+    background-color: var(--app-raised) !important;
+    border: 1px solid var(--app-border) !important;
     border-radius: 10px !important;
-    color: #c8d4f0 !important;
+    color: var(--app-text) !important;
     font-size: 13px !important;
     padding: 10px 48px 10px 46px !important;
     box-shadow: none !important;
 
     &::placeholder {
-        color: #445070 !important;
+        color: var(--app-muted) !important;
     }
 
     &:focus,
@@ -100,9 +100,10 @@
     left: 0;
     width: min(360px, calc(100vw - 32px));
     padding: 12px;
-    border: 1px solid #1b2652;
+    border: 1px solid var(--app-border);
     border-radius: 10px;
-    background: #141f45;
+    background: var(--app-raised);
+    color: var(--app-text);
     box-shadow: 0 8px 24px rgb(0 0 0 / 30%);
 }
 
@@ -115,11 +116,11 @@
     width: 28px !important;
     height: 28px !important;
     min-width: 28px !important;
-    background-color: #00a3f6 !important;
+    background-color: var(--app-accent) !important;
     border-radius: 7px !important;
 
     &:hover {
-        background-color: #159ee4 !important;
+        background-color: #00528f !important;
     }
 }
 
@@ -139,7 +140,7 @@
 .emptyStateTitle {
     font-size: 28px;
     font-weight: 700;
-    color: #ffffff;
+    color: var(--app-text);
 
     margin-bottom: 10px;
 
@@ -148,7 +149,7 @@
 
 .emptyStateSubtitle {
     font-size: 14px;
-    color: #6f7ca8;
+    color: var(--app-muted);
 
     max-width: 420px;
     line-height: 1.5;

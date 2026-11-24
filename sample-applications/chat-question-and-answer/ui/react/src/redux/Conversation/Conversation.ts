@@ -5,6 +5,8 @@ export type ConversationRequest = {
   conversationId: string;
   userPrompt: Message;
   attachments?: File[];
+  newConversationId?: string;
+  modelId?: string;
 };
 export enum MessageRole {
   Assistant = "assistant",

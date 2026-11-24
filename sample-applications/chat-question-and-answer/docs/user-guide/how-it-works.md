@@ -132,7 +132,48 @@ model if it may be needed later.
    - **Response**: The generated response from the LLM microservice is sent to the UI for display and consumption by the user.
    - **Observability dashboard**: If set up, the dashboard displays real-time logs, metrics, and traces providing a view of the performance, accuracy, and resource consumption by the application.
 
+### OVMS model memory lifecycle (Compose)
+
+The Compose OVMS deployment keeps the configured default LLM loaded and loads
+the embedding and reranker models only when needed. Embeddings are leased while
+ChatQnA retrieves context and while document ingestion embeds uploaded files or
+URLs. The reranker is leased only when retrieval produced documents to rank.
+Models are unloaded from RAM/VRAM after the last active operation finishes and
+the configured idle period expires (5 minutes by default). A model's downloaded
+weights and OVMS configuration remain on disk, so the next use reloads them
+without downloading them again.
+
+Concurrent requests share model leases, preventing one request from unloading a
+model while another is using it. The first request after an idle eviction has
+extra latency while OVMS reloads the model. Configure
+`OVMS_MODEL_IDLE_SECONDS` in `.env` to change the idle period. This runtime
+lifecycle is enabled by the Compose deployment scripts; Helm deployments keep
+their chart-defined model-serving lifecycle.
+
+OVMS uses a separate `config_active.json` in the Compose
+`ovms-runtime-config` volume; `ovms/models/config_all.json` remains the
+downloaded-model catalog. The OVMS model directory is mounted read-write for
+model serving, while ChatQnA can update only the active configuration volume.
+Avoid editing `config_active.json` manually while the services are running.
+
 Conversation history is synchronized to the pgvector PostgreSQL database and restored after login. History is scoped to the account, not the browser. The Compose deployment stores PostgreSQL data in the `pgvector-data` named volume, which survives `docker compose down` and container recreation; `docker compose down -v` removes it. Chat messages are no longer persisted in browser localStorage.
+
+### System prompts
+
+Administrators can manage shared system instructions in **Settings → System
+prompts**. Add or edit a prompt, set the fallback default, and assign prompts to
+an exact language model or a model-family match. Exact model names take
+precedence over family matches; family matches are case-insensitive substrings
+of the model name, with the longest match winning. Unmatched models use the
+default prompt. The initial catalog includes general, GPT, Qwen, Llama, and
+Mistral prompts and can be changed without modifying application code.
+
+Prompt changes apply to the next chat request, including existing conversations.
+The instructions are sent as a system-role message; the model server applies
+its own chat template. Deleting a prompt also removes its assignments; the
+default must be changed before it can be deleted. Prompts and assignments are
+stored in PostgreSQL and included in database backups. They are shared across
+users, so do not put secrets in them.
 
 ### Hugging Face token exchange
 
@@ -143,10 +184,10 @@ Configure both values as high-entropy secrets shared only by the ChatQnA and mod
 Create an optional host-side database dump while the database is running:
 
 ```bash
-bash scripts/backup-pgvector.sh
+./easy-deploy.sh backup
 ```
 
-The dump is written to `backups/` by default (or to the directory passed as the script's first argument). It includes account records, sessions, vector data, and conversation history. The database stores password hashes rather than plaintext passwords. For deployments served over HTTPS, set `AUTH_COOKIE_SECURE=true` in `.env` so session cookies are restricted to secure connections. This sample does not include password reset or account recovery.
+The dump is written to `backups/` by default (or to the directory passed after `backup`). It includes account records, sessions, vector data, and conversation history. The database stores password hashes rather than plaintext passwords. For deployments served over HTTPS, set `AUTH_COOKIE_SECURE=true` in `.env` so session cookies are restricted to secure connections. This sample does not include password reset or account recovery.
 
 The application flow is illustrated in the flow diagram below. The diagram shows the API used and the data sharing protocol.
 ![Data flow diagram](./_assets/request.jpg)

@@ -8,7 +8,8 @@ is not implemented.
 
 1. From `sample-applications/chat-question-and-answer`, copy `.env.example` to
    `.env`.
-2. Run `./easy-deploy.sh` from the sample directory. The launcher asks for a
+2. Run `./easy-deploy.sh` from the sample directory and choose `deploy` (or run
+   `./easy-deploy.sh deploy` directly). The launcher asks for a
    Hugging Face token (optional for public models), target device, and initial
    admin password if they are not configured. On first setup, the admin
    password is entered twice and provisions the `admin` account; it must be
@@ -27,8 +28,13 @@ podman compose down --volumes
 
 Use `docker compose down --volumes` if Docker was used.
 
+Run `./easy-deploy.sh backup [backup-directory]` from the sample directory to
+back up the running pgvector database. The default destination is `backups/`.
+To select a backup interactively, run `./easy-deploy.sh` and choose `backup`.
+
 For a complete development reset of this sample, run
-`../nuclear-cleanup.sh`. It removes the ChatQnA Compose containers, orphans,
+`./easy-deploy.sh cleanup` from the sample directory (or choose `cleanup` in
+the interactive menu). It removes the ChatQnA Compose containers, orphans,
 named volumes, and service images while preserving `.env`, downloaded model
 files, and resources belonging to other projects. Add `--full-clean` to also
 remove the configured `MODEL_PATH` (only when it is inside this sample
@@ -36,7 +42,7 @@ directory). Use `--dry-run` to review the actions first. This operation
 permanently deletes ChatQnA database and object-store data.
 
 For unattended use, set `DEVICE` and `CHATQNA_ADMIN_PASSWORD` in `.env` or the
-process environment before running `./easy-deploy.sh`. Set
+process environment before running `./easy-deploy.sh deploy`. Set
 `HUGGINGFACEHUB_API_TOKEN` only when using gated/private models. Environment
 values override `.env`; missing required values cause a non-interactive run to
 exit with an error instead of prompting.

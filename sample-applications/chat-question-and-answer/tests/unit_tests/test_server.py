@@ -1,3 +1,6 @@
+from unittest.mock import AsyncMock
+
+
 def test_query_chain_successful_response(authenticated_client, mocker):
     payload = {
         "conversation_messages": [
@@ -97,6 +100,31 @@ def test_query_chain_invalid_json(authenticated_client):
     response = authenticated_client.post("/chat", content="invalid json")
     assert response.status_code == 422
 
+
+def test_internal_model_lease_requires_service_authentication(
+    test_client, monkeypatch
+):
+    from app.server import model_lifecycle
+
+    monkeypatch.setenv("MODEL_DOWNLOAD_SERVICE_TOKEN", "a" * 40)
+    monkeypatch.setattr(model_lifecycle, "enabled", True)
+    acquire = AsyncMock()
+    monkeypatch.setattr(model_lifecycle, "acquire", acquire)
+    payload = {"model_name": "org/embedding", "lease_id": "test-lease"}
+
+    unauthorized = test_client.post("/internal/model-runtime/leases", json=payload)
+    assert unauthorized.status_code == 401
+    acquire.assert_not_awaited()
+
+    authorized = test_client.post(
+        "/internal/model-runtime/leases",
+        json=payload,
+        headers={"Authorization": f"Bearer {'a' * 40}"},
+    )
+    assert authorized.status_code == 204
+    acquire.assert_awaited_once_with("org/embedding", "test-lease")
+
+
 def test_root(test_client):
     response = test_client.get("/")
     assert response.status_code == 200
@@ -174,6 +202,44 @@ def test_set_conversation_model_rejects_unavailable_model(authenticated_client, 
     )
 
     assert response.status_code == 422
+
+
+def test_system_prompt_settings_require_admin(authenticated_client, mocker):
+    list_prompts = mocker.patch("app.server.list_system_prompts")
+    response = authenticated_client.get("/settings/system-prompts")
+    assert response.status_code == 403
+    list_prompts.assert_not_awaited()
+    response = authenticated_client.post(
+        "/settings/system-prompts", json={"name": "Custom", "content": "Instructions"}
+    )
+    assert response.status_code == 403
+
+
+def test_admin_manages_system_prompts_and_assignments(admin_client, mocker):
+    create = mocker.patch("app.server.save_system_prompt", return_value="new-id")
+    assign = mocker.patch("app.server.set_prompt_assignment")
+    response = admin_client.post(
+        "/settings/system-prompts", json={"name": "Custom", "content": "Instructions"}
+    )
+    assert response.status_code == 201
+    assert response.json() == {"id": "new-id"}
+    create.assert_awaited_once_with("Custom", "Instructions")
+
+    response = admin_client.put(
+        "/settings/system-prompts/assignments",
+        json={"scope": "family", "target": "qwen", "prompt_id": "new-id"},
+    )
+    assert response.status_code == 200
+    assign.assert_awaited_once_with("family", "qwen", "new-id")
+
+    default = mocker.patch(
+        "app.server.delete_system_prompt",
+        side_effect=ValueError("Select another default before deleting this system prompt."),
+    )
+    response = admin_client.delete("/settings/system-prompts/general")
+    assert response.status_code == 422
+    assert "another default" in response.json()["detail"]
+    default.assert_awaited_once_with("general")
 
 
 def test_admin_removes_installed_model_files_and_catalog_record(admin_client, mocker):

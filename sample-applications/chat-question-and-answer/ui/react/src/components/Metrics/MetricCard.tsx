@@ -72,7 +72,7 @@ export function MetricCard({ label, value, color, data }: MetricCardProps) {
         <div className={classes.chartCard}>
             <div className={classes.chartCardHead}>
                 <span className={classes.chartCardLabel} title={label}>{label}</span>
-                <span className={classes.chartCardValue} style={{ color }}>
+                <span className={classes.chartCardValue}>
                     {value}
                 </span>
             </div>

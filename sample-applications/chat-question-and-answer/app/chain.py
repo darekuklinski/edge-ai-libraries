@@ -1,7 +1,9 @@
 # Copyright (C) 2025 Intel Corporation
 # SPDX-License-Identifier: Apache-2.0
 
+import asyncio
 import os
+from contextlib import AsyncExitStack
 from sqlalchemy.ext.asyncio import create_async_engine
 from langchain_core.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
 from langchain_postgres.vectorstores import PGVector as EGAIVectorDB
@@ -18,6 +20,8 @@ from langchain_openai import OpenAIEmbeddings as EGAIEmbeddings
 from .custom_reranker import CustomReranker
 from .retrieval import retrieve_context
 from .account_store import get_default_model_settings
+from .model_lifecycle import model_lifecycle
+from .system_prompts import get_system_prompt_for_model
 import logging
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
@@ -88,47 +92,10 @@ retriever = EGAIVectorStoreRetriever(
     search_kwargs={"k": FETCH_K, "fetch_k": FETCH_K * 3},
 )
 
-# Define our prompt
-template = """
-<|start|>system<|message|>
-Reasoning: none
-SYSTEM CONSTRAINT: 
-You have no access to the internet.
-Don't hesitate to ask questions when in doubt, especially when question is unclear.
-If You don't know the answer just say it.
-IMPORTANT: For longer answers use markdown as below. If answear is short, you can use regular text.:
-
-**Example:**
-## Topic Title 
-Here's regular text with
-**important points** and *emphasized terms.*
-### Key Benefits:
-- **Benefit 1:** Clear description
-- **Benefit 2:** Another point
-> 💡 **Pro Tip:** This makes information stand out!
-### Sample Table:
-| Syntax      | Description | Notes |
-| :---------- | :---------: | ----: |
-| Header      | Title       | Note1 |
-| Paragraph   | Text        | Note2 |
-### Sample Code:
-```python
-def example_function():
-    print("This is a code block")
-```
-Always prioritize clarity and scannability in your responses.
-<|end|><|start|>user<|message|>
-Conversation history: {history}
-Retrieved context:
-{context}
-
-Use retrieved context when relevant and combine it with your general knowledge. If the context does not contain the answer, be clear about that and answer from your general knowledge when possible. Do not invent facts or claim that unsupported statements came from the context.
-prompt: {question}
-<|end|><|start|>assistant
-"""
-
-
-prompt = ChatPromptTemplate.from_template(template)
+prompt = ChatPromptTemplate.from_messages([
+    ("system", "{system_prompt}"),
+    ("human", "Conversation history:\n{history}\n\nRetrieved context:\n{context}\n\nQuestion: {question}"),
+])
 
 ENDPOINT_URL = os.getenv("ENDPOINT_URL", "http://localhost:8080")
 
@@ -172,6 +139,11 @@ async def context_retriever_fn(chain_inputs: dict):
     attachments = chain_inputs.get("attachments", [])
     model_settings = await get_default_model_settings("embedding")
     selected_model = model_settings["model_name"] if model_settings else MODEL_NAME
+    embedding_backend = (
+        model_settings.get("backend")
+        if model_settings
+        else ("ovms" if "ovms" in EMBEDDING_ENDPOINT_URL.lower() else "")
+    )
     active_vectorstore = knowledge_base
     active_retriever = retriever
     if selected_model != MODEL_NAME:
@@ -190,14 +162,17 @@ async def context_retriever_fn(chain_inputs: dict):
             search_type="mmr",
             search_kwargs={"k": FETCH_K, "fetch_k": FETCH_K * 3},
         )
-    return await retrieve_context(
-        question,
-        attachments,
-        active_vectorstore,
-        active_retriever,
-        FETCH_K,
-        FETCH_K * 3,
-    )
+    async with AsyncExitStack() as stack:
+        if embedding_backend == "ovms":
+            await stack.enter_async_context(model_lifecycle.lease(selected_model))
+        return await retrieve_context(
+            question,
+            attachments,
+            active_vectorstore,
+            active_retriever,
+            FETCH_K,
+            FETCH_K * 3,
+        )
 
 # Format the context in a readable way
 def format_docs(docs):
@@ -307,17 +282,26 @@ async def process_chunks(
         model_name=reranker_model if use_ovms_reranker else None,
         ovms=use_ovms_reranker,
     )
-    re_ranker_lambda = RunnableLambda(re_ranker.rerank)
+    async def rerank_context_fn(retrieved_docs: dict):
+        if not retrieved_docs.get("context"):
+            return retrieved_docs
+        if use_ovms_reranker and reranker_model:
+            async with model_lifecycle.lease(reranker_model):
+                return await asyncio.to_thread(re_ranker.rerank, retrieved_docs)
+        return await asyncio.to_thread(re_ranker.rerank, retrieved_docs)
+
+    re_ranker_lambda = RunnableLambda(rerank_context_fn)
+    system_prompt = await get_system_prompt_for_model(model_name or LLM_MODEL)
 
     # RAG Chain
     chain = (
         RunnableParallel({
             "context": context_retriever,  # context retrieved from vector store
             "question": lambda x: x["question"],  # passes through the question
-            "history": lambda x: x["history"]  # passes through the history
+            "history": lambda x: x["history"],  # passes through the history
         })
         | re_ranker_lambda
-        | {"context": (lambda x: format_docs(x["context"])), "question": lambda x: x["question"], "history": lambda x: x["history"]}
+        | {"context": (lambda x: format_docs(x["context"])), "question": lambda x: x["question"], "history": lambda x: x["history"], "system_prompt": lambda _: system_prompt}
         | prompt
         | model
         | StrOutputParser()
@@ -330,12 +314,12 @@ async def process_chunks(
         "attachments": attachments or [],
     }
 
-    async for log in chain.astream(chain_input):
-        if log == "\n":
-            yield f"data: \\n\\n\n\n"
-        elif log.endswith("\n"):
-            yield f"data: {log}\n\n"
-            yield f"data: \\n\\n\n\n"
-        else:
-            yield f"data: {log}\n\n"
-        #yield f"data: {log}\n\n"
+    async with model_lifecycle.lease(model_name or LLM_MODEL):
+        async for log in chain.astream(chain_input):
+            if log == "\n":
+                yield f"data: \\n\\n\n\n"
+            elif log.endswith("\n"):
+                yield f"data: {log}\n\n"
+                yield f"data: \\n\\n\n\n"
+            else:
+                yield f"data: {log}\n\n"

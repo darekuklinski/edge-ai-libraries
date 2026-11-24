@@ -4,7 +4,8 @@ This guide provides step-by-step instructions for building the Chat Q&A sample a
 
 > **Note:**
 >
-> - The dependent microservices must be built separately from their respective microservice folders.
+> - The Model Download microservice must be deployed separately. Compose builds
+>   the ChatQnA backend, UI, and document-ingestion service from the local source.
 > - The build instruction is applicable only on an Ubuntu system. Build from source is not supported either for the sample application or the dependent microservices on [Edge Microvisor Toolkit](https://github.com/open-edge-platform/edge-microvisor-toolkit). It is recommended to use prebuilt images on Edge Microvisor Toolkit.
 
 ## Prerequisites

@@ -2,8 +2,8 @@
     position: relative;
     height: 48px;
     flex-shrink: 0;
-    background: #070d2d;
-    border-bottom: 1px solid #1b2652;
+    background: var(--app-shell);
+    border-bottom: 1px solid var(--app-border);
 
     display: flex;
     align-items: center;
@@ -34,12 +34,14 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    color: #b8c0d8;
+    color: var(--app-muted);
     font-size: 12px;
 }
 
 .username {
-    color: #e8eaf0;
+    color: var(--app-text);
+    --button-color: var(--app-text);
+    --button-hover-color: var(--app-text);
     font-weight: 600;
 }
 
@@ -52,5 +54,5 @@
 .navTitle {
     font-size: 15px;
     font-weight: 500;
-    color: #e8eaf0;
+    color: var(--app-text);
 }

@@ -37,6 +37,8 @@ export const MODELS_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/models';
 export const SETTINGS_MODELS_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/settings/models';
+export const SYSTEM_PROMPTS_URL: string =
+  import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/settings/system-prompts';
 export const CONVERSATION_HISTORY_URL: string =
   import.meta.env.VITE_BACKEND_SERVICE_ENDPOINT + '/conversations';
 export const AUTH_URL: string =

@@ -592,10 +592,10 @@ export const doConversation = createAsyncThunk(
 
     if (!conversationId) {
       // New conversation
-      const id = uuidv4();
+      const id = conversationRequest.newConversationId ?? uuidv4();
       activeConversationId = id;
       const state = getState() as RootState;
-      const modelId = state.conversationReducer.models.find(
+      const modelId = conversationRequest.modelId ?? state.conversationReducer.models.find(
         (model) => model.is_default,
       )?.id;
 
