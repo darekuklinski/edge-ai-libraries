@@ -17,6 +17,7 @@ import {
   Stack,
   Text,
   Textarea,
+  Tooltip,
   rem,
 } from '@mantine/core'
 import { IconArrowRight, IconPaperclip, IconX } from '@tabler/icons-react'
@@ -49,6 +50,7 @@ const Conversation = ({ title }: ConversationProps) => {
 
   title = title //fix this
   const [prompt, setPrompt] = useState<string>("")
+  const [allowWeb, setAllowWeb] = useState(false)
   const [hasLLMResponse, setHasLLMResponse] = useState<boolean>(false)
   const [attachmentPickerOpened, setAttachmentPickerOpened] = useState(false)
   const [localFile, setLocalFile] = useState<globalThis.File | null>(null)
@@ -90,6 +92,10 @@ const Conversation = ({ title }: ConversationProps) => {
     dispatch(fetchModelName(undefined));
     dispatch(fetchAvailableModels());
   }, [dispatch]);
+
+  useEffect(() => {
+    setAllowWeb(false);
+  }, [selectedConversationId]);
 
   // Check if we have any LLM responses to show model name
   useEffect(() => {
@@ -155,6 +161,7 @@ const Conversation = ({ title }: ConversationProps) => {
       modelId: newConversationId ? selectedModel?.id : undefined,
       userPrompt,
       attachments: submittedAttachments,
+      allowWeb,
     }))
     setPendingAttachments((current) =>
       current.filter((file) => !submittedAttachments.some((submitted) => sameFile(file, submitted))),
@@ -169,6 +176,7 @@ const Conversation = ({ title }: ConversationProps) => {
     })
     setAttachmentPickerOpened(false)
     setPrompt("")
+    setAllowWeb(false)
   }
 
   const scrollToBottom = () => {
@@ -189,6 +197,7 @@ const Conversation = ({ title }: ConversationProps) => {
 
   const handleNewConversation = () => {
     setDraftModelId(null)
+    setAllowWeb(false)
     dispatch(newConversation())
   }
 
@@ -338,6 +347,15 @@ const Conversation = ({ title }: ConversationProps) => {
                 mb="sm"
               />
             )}
+            <Tooltip label="Allow and deny rules for URLs and search phrases can be configured in Settings → Web access." multiline w={280}>
+              <Checkbox
+                label="Allow web"
+                checked={allowWeb}
+                onChange={(event) => setAllowWeb(event.currentTarget.checked)}
+                disabled={modelSelectionPending}
+                mb="sm"
+              />
+            </Tooltip>
             {pendingAttachments.length > 0 && (
               <Group gap="xs" mb="xs">
                 {pendingAttachments.map((file) => (

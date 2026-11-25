@@ -113,6 +113,32 @@ describe("SettingsPage", () => {
     expect(onBack).toHaveBeenCalledOnce();
   });
 
+  it("adds and removes per-user web rules", async () => {
+    const rule = { kind: "url", effect: "allow", value: "https://example.com/article" };
+    vi.mocked(client.get).mockResolvedValue({ data: { rules: [] } } as never);
+    vi.mocked(client.put)
+      .mockResolvedValueOnce({ data: { rules: [rule] } } as never)
+      .mockResolvedValueOnce({ data: { rules: [] } } as never);
+    render(<MantineProvider><SettingsPage onBack={vi.fn()} /></MantineProvider>);
+    fireEvent.click(screen.getByRole("tab", { name: "Web access" }));
+    fireEvent.change(await screen.findByLabelText(/HTTPS page URL/), { target: { value: rule.value } });
+    fireEvent.click(screen.getByRole("button", { name: "Add rule" }));
+    await screen.findByText(rule.value);
+    expect(client.put).toHaveBeenCalledWith(expect.stringContaining("/settings/web-access"), { rules: [rule] });
+    fireEvent.click(screen.getByRole("button", { name: `Remove ${rule.value}` }));
+    await waitFor(() => expect(client.put).toHaveBeenLastCalledWith(
+      expect.stringContaining("/settings/web-access"), { rules: [] },
+    ));
+  });
+
+  it("does not allow rule replacement when loading rules fails", async () => {
+    vi.mocked(client.get).mockRejectedValue(new Error("offline"));
+    render(<MantineProvider><SettingsPage onBack={vi.fn()} /></MantineProvider>);
+    fireEvent.click(screen.getByRole("tab", { name: "Web access" }));
+    expect(await screen.findByText("Could not load web access rules. Please retry.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Add rule" })).toBeNull();
+  });
+
   it("saves a Hugging Face token without retrieving its value", async () => {
     vi.mocked(client.put).mockResolvedValue({ data: { status: "success" } } as never);
     render(

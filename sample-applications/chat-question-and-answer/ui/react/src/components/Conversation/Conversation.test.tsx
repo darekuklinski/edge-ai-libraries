@@ -179,6 +179,23 @@ describe("conversation file attachments", () => {
 
     expect(request.attachments).toEqual([]);
     expect(request.conversation_id).toBeTruthy();
+    expect(request.allow_web).toBe(false);
+  });
+
+  test("sends web access only when checked and resets after submission", async () => {
+    renderConversation();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Allow web" }));
+    const request = await sendQuestion("What did it accomplish?");
+    expect(request.allow_web).toBe(true);
+    expect(screen.getByRole("checkbox", { name: "Allow web" })).not.toBeChecked();
+  });
+
+  test("clears web opt-in when starting a new chat", async () => {
+    renderConversation();
+    const checkbox = screen.getByRole("checkbox", { name: "Allow web" });
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole("button", { name: "New chat" }));
+    expect(checkbox).not.toBeChecked();
   });
 
   test("chooses a model before the first message and hides the selector afterward", async () => {

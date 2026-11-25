@@ -640,6 +640,7 @@ export const doConversation = createAsyncThunk(
       max_tokens: MAX_TOKENS ?? 512,
       attachments: conversationRequest.attachments ?? [],
       conversation_id: activeConversationId,
+      allow_web: conversationRequest.allowWeb ?? false,
     };
 
     // Set generating state - user has submitted, waiting for AI to start responding
@@ -689,6 +690,9 @@ export const doConversation = createAsyncThunk(
               // Keep blinking indicator active throughout streaming - it will stop in onclose() once streaming ends
               const parsedMetadata = tryParseResponseMetadata(msg.data);
 
+              if (parsedMetadata?.error) {
+                throw new Error(parsedMetadata.error);
+              }
               if (parsedMetadata?.finished) {
                 responseTimeMs = parsedMetadata.response_time_ms;
                 return;
@@ -784,11 +788,11 @@ function decodeEscapedBytes(str: string): string {
   return new TextDecoder("utf-8").decode(new Uint8Array(byteArray));
 }
 
-function tryParseResponseMetadata(data: string): { response_time_ms?: number; finished?: boolean } | null {
+function tryParseResponseMetadata(data: string): { response_time_ms?: number; finished?: boolean; error?: string } | null {
   try {
     const parsed = JSON.parse(data);
 
-    if (typeof parsed === "object" && parsed !== null && "finished" in parsed) {
+    if (typeof parsed === "object" && parsed !== null && ("finished" in parsed || typeof parsed.error === "string")) {
       return parsed;
     }
 
