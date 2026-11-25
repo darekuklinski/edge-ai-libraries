@@ -40,6 +40,22 @@ def test_prompt_storage_resolution_and_seed_lifecycle(monkeypatch):
 
             async with engine.begin() as connection:
                 await connection.execute(text("""
+                    UPDATE chat_system_prompts SET content = :content WHERE id = 'llama'
+                """), {"content": next(
+                    item["content"] for item in prompts if item["id"] == "llama"
+                ).replace(system_prompts._WEB_OPENING, system_prompts._LEGACY_OPENING, 1)})
+                await connection.execute(text("""
+                    UPDATE chat_system_prompts SET content = 'Custom instructions' WHERE id = 'gpt'
+                """))
+                await system_prompts.initialize_system_prompts(connection)
+            prompts, assignments = await system_prompts.list_system_prompts()
+            assert next(item["content"] for item in prompts if item["id"] == "llama").startswith(
+                system_prompts._WEB_OPENING
+            )
+            assert next(item["content"] for item in prompts if item["id"] == "gpt") == "Custom instructions"
+
+            async with engine.begin() as connection:
+                await connection.execute(text("""
                     INSERT INTO chat_models (id, model_name, display_name, task)
                     VALUES ('model-1', 'Qwen/Qwen3', 'Qwen3', 'llm')
                 """))

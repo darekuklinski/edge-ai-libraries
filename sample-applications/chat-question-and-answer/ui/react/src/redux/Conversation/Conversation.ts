@@ -7,6 +7,7 @@ export type ConversationRequest = {
   attachments?: File[];
   newConversationId?: string;
   modelId?: string;
+  allowWeb?: boolean;
 };
 export enum MessageRole {
   Assistant = "assistant",

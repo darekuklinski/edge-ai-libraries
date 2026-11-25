@@ -44,6 +44,42 @@ def test_query_chain_passes_attachments(authenticated_client, mocker):
     assert response.status_code == 200
     assert process_chunks.call_args.args[2] == payload["attachments"]
 
+def test_query_chain_passes_opt_in_web_search(authenticated_client, mocker):
+    async def empty_stream(*_args, **_kwargs):
+        yield "answer"
+
+    process_chunks = mocker.patch("app.server.process_chunks", side_effect=empty_stream)
+    rules = [
+        {"kind": "phrase", "effect": "allow", "value": "Apollo 11"},
+        {"kind": "url", "effect": "allow", "value": "https://example.com/"},
+    ]
+    load = mocker.patch("app.server.get_web_rules", return_value=rules)
+    response = authenticated_client.post("/chat", json={
+        "conversation_messages": [{"role": "user", "content": "Tell me about Apollo 11"}],
+        "max_tokens": 512,
+        "allow_web": True,
+    })
+    assert response.status_code == 200
+    assert process_chunks.call_args.args[4] == "Apollo 11"
+    assert process_chunks.call_args.args[5] == rules
+    load.assert_awaited_once_with(7)
+
+    invalid = authenticated_client.post("/chat", json={
+        "conversation_messages": [{"role": "user", "content": "Question"}],
+        "max_tokens": 512,
+        "allow_web": True,
+    })
+    assert invalid.status_code == 422
+
+def test_web_rules_are_scoped_to_authenticated_user(authenticated_client, mocker):
+    rules = [{"kind": "url", "effect": "allow", "value": "https://example.com/"}]
+    get_rules = mocker.patch("app.server.get_web_rules", return_value=rules)
+    save_rules = mocker.patch("app.server.save_web_rules", return_value=rules)
+    assert authenticated_client.get("/settings/web-access").json() == {"rules": rules}
+    assert authenticated_client.put("/settings/web-access", json={"rules": rules}).json() == {"rules": rules}
+    get_rules.assert_awaited_once_with(7)
+    save_rules.assert_awaited_once_with(7, rules)
+
 def test_query_chain_uses_conversation_model(authenticated_client, mocker):
     payload = {
         "conversation_messages": [{"role": "user", "content": "Question"}],

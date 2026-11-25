@@ -28,6 +28,10 @@ The Chat Q&A application is a combination of the core LangChain application logi
 
    - **Web pages (PoC)**: Contents of accessible web pages can also be parsed and used as input for the RAG pipeline.
 
+     For live retrieval, configure per-account **Settings → Web access** rules, then check **Allow web** for the message. Add exact public HTTPS page URLs and search phrases as allow or deny rules. Denied rules take precedence; the message must contain an allowed URL or phrase. When searching, only the matching allowed phrase is sent to Bing, and only exact allowed result URLs are fetched. Do not add sensitive information to search phrases. The conversation and indexed documents are not sent as search terms; refinements must also match an allowed phrase. No configured rules means web access is blocked.
+
+     The fetcher makes unauthenticated GET requests to public HTTPS addresses only, pins resolved IPs, does not follow redirects, and rejects URLs with credentials, query strings, or fragments. It does not execute JavaScript, fill forms, or send form data. Remote sites can still implement side effects for GET requests. Pages added through Data Source are indexed separately and may be stale.
+
      > **Note**: URL-based ingestion is currently implemented as a proof of concept (PoC). This application works best with non–JavaScript-heavy pages (e.g., Wikipedia, blogs, news sites) that render most of their content directly in HTML. JavaScript-heavy pages (e.g., social media platforms, single-page applications) load content dynamically via JavaScript, so their raw HTML often lacks useful text. The current implementation only parses raw HTML and does not execute JavaScript, so such pages may return incomplete or inaccurate results and should be avoided or handled separately.
 
      > Sometimes, even certain static Wikipedia pages may not yield meaningful content, as the current HTML-to-text conversion can extract navigation menus or metadata instead of the main article body. Since URL processing is primarily a proof of concept, it can be extended based on specific use cases by enhancing the document-ingestion microservice capabilities.

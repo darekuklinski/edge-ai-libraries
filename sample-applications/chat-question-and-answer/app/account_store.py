@@ -188,8 +188,10 @@ async def _ensure_tables() -> None:
             )
 
             from .system_prompts import initialize_system_prompts
+            from .web_policy import initialize_web_policy
 
             await initialize_system_prompts(connection)
+            await initialize_web_policy(connection)
 
             configured_models = (
                 (

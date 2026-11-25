@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field, SecretStr, field_validator
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.exc import SQLAlchemyError
 from .chain import process_chunks
+from .web_policy import get_web_rules, save_web_rules, select_web_query
 from .metrics import SystemMonitor
 import httpx
 from typing import Any, List, Literal
@@ -121,6 +122,17 @@ class QuestionRequest(BaseModel):
     max_tokens: int
     attachments: List[FileAttachment] = Field(default_factory=list)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    allow_web: bool = False
+
+
+class WebRuleRequest(BaseModel):
+    kind: Literal["url", "phrase"]
+    effect: Literal["allow", "deny"]
+    value: str = Field(min_length=1, max_length=2048)
+
+
+class WebRulesRequest(BaseModel):
+    rules: list[WebRuleRequest] = Field(max_length=100)
 
 
 class RegisterAccountRequest(BaseModel):
@@ -726,6 +738,28 @@ async def list_managed_models(_user: dict[str, Any] = Depends(require_user)):
         ) from error
 
 
+@app.get("/settings/web-access")
+async def get_web_access_settings(user: dict[str, Any] = Depends(require_user)):
+    try:
+        return {"rules": await get_web_rules(user["id"])}
+    except SQLAlchemyError as error:
+        logging.exception("Failed to load web access rules")
+        raise HTTPException(status_code=503, detail="Web settings storage is unavailable") from error
+
+
+@app.put("/settings/web-access")
+async def update_web_access_settings(
+    payload: WebRulesRequest, user: dict[str, Any] = Depends(require_user)
+):
+    try:
+        return {"rules": await save_web_rules(user["id"], [rule.model_dump() for rule in payload.rules])}
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except SQLAlchemyError as error:
+        logging.exception("Failed to save web access rules")
+        raise HTTPException(status_code=503, detail="Web settings storage is unavailable") from error
+
+
 @app.get("/settings/system-prompts")
 async def get_system_prompt_settings(_admin: dict[str, Any] = Depends(require_admin)):
     try:
@@ -1075,6 +1109,9 @@ async def query_chain(
                 _user["id"], payload.conversation_id
             )
 
+        web_rules = await get_web_rules(_user["id"]) if payload.allow_web else []
+        web_search = select_web_query(question_text, web_rules) if payload.allow_web else None
+
         # Add timing to the generator
         timed_generator = await add_timing_to_generator(
             process_chunks, 
@@ -1082,12 +1119,16 @@ async def query_chain(
             max_tokens,
             [attachment.model_dump() for attachment in payload.attachments],
             model_name,
+            web_search,
+            web_rules,
         )
         
         return StreamingResponse(timed_generator, media_type="text/event-stream")
         
     except HTTPException:
         raise
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     except SQLAlchemyError as error:
         logging.exception("Failed to load the conversation model selection")
         raise HTTPException(

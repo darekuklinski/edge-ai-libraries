@@ -22,6 +22,7 @@ import { ADMIN_USERS_URL, AUTH_URL, SETTINGS_MODELS_URL } from "../../config";
 import client from "../../utils/client";
 import classes from "./SettingsPage.module.scss";
 import { SystemPromptsTab } from "./SystemPromptsTab";
+import { WebAccessTab } from "./WebAccessTab";
 
 type SettingsPageProps = {
   onBack: () => void;
@@ -822,6 +823,11 @@ export function SettingsPage({
       value: "models",
       label: "Models",
       panel: <ModelManagementTab isAdmin={isAdmin} />,
+    },
+    {
+      value: "web-access",
+      label: "Web access",
+      panel: <WebAccessTab />,
     },
     ...(isAdmin
       ? [{
